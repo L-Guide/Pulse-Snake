@@ -242,7 +242,7 @@ function showRewardedAd(onSuccess){
 
 // ---------- Audio ----------
 let audioCtx = null, bgmGain = null;
-const bgmVolume = 0.12;
+const bgmVolume = 0.28;
 let bgmOscs = [], bgmRunning = false, musicInterval = null;
 
 function initAudio(){
@@ -258,7 +258,7 @@ function playTone(freq, dur, type, vol, det){
   var o = audioCtx.createOscillator(), g = audioCtx.createGain();
   o.type = type || 'sine'; o.frequency.value = freq;
   if(det) o.detune.value = det;
-  g.gain.value = vol || 0.15;
+  g.gain.value = Math.min(0.95, (vol || 0.15) * 3.2);
   g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
   o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + dur);
 }
@@ -275,25 +275,63 @@ function sfxShift(){ playTone(1000,0.08,'sine',0.06); }
 function startBGM(){
   if(bgmRunning || !audioCtx) return;
   bgmRunning = true;
-  var p1 = audioCtx.createOscillator(), g1 = audioCtx.createGain();
-  p1.type = 'sine'; p1.frequency.value = 110; g1.gain.value = 0.08;
-  p1.connect(g1); g1.connect(bgmGain); p1.start(); bgmOscs.push(p1);
-  var p2 = audioCtx.createOscillator(), g2 = audioCtx.createGain();
-  p2.type = 'sine'; p2.frequency.value = 165; g2.gain.value = 0.06;
-  p2.connect(g2); g2.connect(bgmGain); p2.start(); bgmOscs.push(p2);
-  var notes = [330,392,440,523,440,392,330,294], ni = 0;
-  function melodyNote(){
+
+  var master = audioCtx.createGain();
+  master.gain.value = 1.0;
+  var lp = audioCtx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 2600;
+  lp.Q.value = 0.4;
+  master.connect(lp); lp.connect(bgmGain);
+
+  var padGain = audioCtx.createGain();
+  padGain.gain.value = 0.8;
+  padGain.connect(master);
+
+  var prog = [
+    [220.0, 261.63, 329.63],
+    [174.61, 220.0, 261.63],
+    [196.00, 246.94, 293.66],
+    [164.81, 196.00, 246.94]
+  ];
+  var pi = 0, barMs = 3600;
+
+  function scheduleBar(){
     if(!bgmRunning || !audioCtx) return;
-    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
-    o.type = 'sine'; o.frequency.value = notes[ni % notes.length];
-    g.gain.value = 0.04; g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 1.5);
-    o.connect(g); g.connect(bgmGain); o.start(); o.stop(audioCtx.currentTime + 1.5);
-    ni++;
+    var t0 = audioCtx.currentTime + 0.1;
+    var chord = prog[pi % prog.length];
+    pi++;
+
+    var pG = audioCtx.createGain();
+    pG.gain.setValueAtTime(0.0001, t0);
+    pG.gain.linearRampToValueAtTime(0.32, t0 + 0.7);
+    pG.gain.linearRampToValueAtTime(0.0001, t0 + barMs/1000 - 0.6);
+    pG.connect(padGain);
+    for(var k=0;k<3;k++){
+      var o = audioCtx.createOscillator();
+      o.type = 'triangle';
+      o.frequency.value = chord[k];
+      o.detune.value = (Math.random()*6-3);
+      o.connect(pG);
+      o.start(t0); o.stop(t0 + barMs/1000 + 0.1);
+    }
+
+    for(var m=0;m<3;m++){
+      var tn = t0 + 0.6 + m*0.55;
+      var noteF = chord[Math.floor(Math.random()*3)] * 2;
+      var o2 = audioCtx.createOscillator();
+      var g2 = audioCtx.createGain();
+      o2.type = 'sine';
+      o2.frequency.value = noteF;
+      g2.gain.setValueAtTime(0.0001, tn);
+      g2.gain.linearRampToValueAtTime(0.12, tn + 0.03);
+      g2.gain.exponentialRampToValueAtTime(0.001, tn + 0.9);
+      o2.connect(g2); g2.connect(master);
+      o2.start(tn); o2.stop(tn + 1);
+    }
   }
-  musicInterval = setInterval(melodyNote, 2200);
-  var bass = audioCtx.createOscillator(), bg = audioCtx.createGain();
-  bass.type = 'sine'; bass.frequency.value = 55; bg.gain.value = 0.06;
-  bass.connect(bg); bg.connect(bgmGain); bass.start(); bgmOscs.push(bass);
+  scheduleBar();
+  musicInterval = setInterval(scheduleBar, barMs);
 }
 function stopBGM(){
   bgmRunning = false;
@@ -335,16 +373,16 @@ const ORB_COUNT = 220;
 const BOT_COUNT = 7;
 
 const COLORS = [
-  '#00eaff',
-  '#ff2fd0',
-  '#00ff88',
-  '#8a63ff',
-  '#ff6a00',
-  '#ff4d6d',
-  '#4dd2ff',
-  '#ffd23f',
-  '#c0ff3f',
-  '#ff5cc8'
+  '#ff0000',
+  '#00ff00',
+  '#0000ff',
+  '#ffff00',
+  '#ff00ff',
+  '#00ffff',
+  '#ff8000',
+  '#cc00ff',
+  '#80ff00',
+  '#ff007f'
 ];
 const SHIFT_TIME = 30000;
 const CYCLE = SHIFT_TIME * COLORS.length;
@@ -526,11 +564,9 @@ let player, bots, orbs, particles, running, initialized, score, mx, my, pointerA
 
 function spawnOrb(){
   const isPrism = Math.random() < 0.025;
-  const matchColor = player && player.color ? player.color : COLORS[0];
-  const pick = Math.random() < 0.5 ? matchColor : COLORS[Math.floor(Math.random()*COLORS.length)];
   return {
     x: rand(40, WORLD_W-40), y: rand(40, WORLD_H-40),
-    color: isPrism ? 'gold' : pick,
+    color: isPrism ? 'gold' : COLORS[Math.floor(Math.random()*COLORS.length)],
     r: isPrism ? 10 : rand(4,6),
     wobble: rand(0, Math.PI*2),
     prism: isPrism
