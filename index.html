@@ -151,9 +151,9 @@
   <div class="overlay hidden" id="howToPlayScreen">
     <div class="howToPlayContent">
       <h3>HOW TO PLAY</h3>
-      <p>Color shifts <b>slowly at first</b>, speeds up as you survive.</p>
+      <p>Colors shift through <b>10 different hues</b>, changing <b>every 30 seconds</b>.</p>
       <p>Eat <b>matching orbs</b> to grow. <span class="g">Mismatched enemies</span> are lethal on contact.</p>
-      <p><span class="g">Overload:</span> eat both colors within a few seconds for temporary golden invincibility.</p>
+      <p><span class="g">Overload:</span> eat two different colors within a few seconds for temporary golden invincibility.</p>
       <p><span class="g">Duel:</span> collide with a mismatched enemy and you get one timing-based chance to survive instead of instant death.</p>
       <p><span class="g">Prism orbs</span> explode into a burst of orbs when eaten.</p>
       <p><b>Controls:</b><br>
@@ -161,7 +161,7 @@
       Arrow Keys / WASD: steer<br>
       Space: boost / trigger duel<br>
       Escape: pause</p>
-      <p>Your snake <b>auto-circles</b> when idle. Hitting your own body is <b>safe</b>!</p>
+      <p>Your snake <b>moves in a straight line</b> when idle. Hitting your own body is <b>safe</b>!</p>
     </div>
     <button class="btn" id="howToPlayBackBtn">BACK</button>
   </div>
@@ -325,18 +325,29 @@ resize();
 const CYAN = '#00eaff';
 const MAGENTA = '#ff2fd0';
 const BASE_SPEED = 2.4;
-const PLAYER_SPEED = 2.6;
+const PLAYER_SPEED = 2.8;
 const BOOST_SPEED = 4.0;
 const START_LEN = 26;
 const GROW_AMT = 6;
 const SHRINK_AMT = 8;
 const MIN_LEN = 8;
-const ORB_COUNT = 90;
+const ORB_COUNT = 170;
 const BOT_COUNT = 7;
 
-const PERIOD_START = 9000;
-const PERIOD_MIN   = 4200;
-const RAMP_TIME     = 42000;
+const COLORS = [
+  '#00eaff',
+  '#ff2fd0',
+  '#00ff88',
+  '#8a63ff',
+  '#ff6a00',
+  '#ff4d6d',
+  '#4dd2ff',
+  '#ffd23f',
+  '#c0ff3f',
+  '#ff5cc8'
+];
+const SHIFT_TIME = 30000;
+const CYCLE = SHIFT_TIME * COLORS.length;
 
 const COMBO_WINDOW = 3500;
 const OVERLOAD_DURATION = 4500;
@@ -394,18 +405,64 @@ function shadeColor(hex, pct){
   return "#" + (0x1000000 + rr*0x10000 + gg*0x100 + bb).toString(16).slice(1);
 }
 
+const orbSprites = {};
+function orbSprite(color, r){
+  const key = color + '_' + r;
+  if(orbSprites[key]) return orbSprites[key];
+  const pad = 18;
+  const c = document.createElement('canvas');
+  c.width = c.height = (r+pad)*2;
+  const x = c.getContext('2d');
+  const cx = r+pad, cy = r+pad;
+  const grad = x.createRadialGradient(cx-2, cy-2, 1, cx, cy, r+pad);
+  grad.addColorStop(0, shadeColor(color, 0.4));
+  grad.addColorStop(0.45, color);
+  grad.addColorStop(1, shadeColor(color, -0.6));
+  x.shadowColor = color;
+  x.shadowBlur = 12;
+  x.beginPath();
+  x.arc(cx, cy, r, 0, Math.PI*2);
+  x.fillStyle = grad;
+  x.fill();
+  x.shadowBlur = 0;
+  orbSprites[key] = c;
+  return c;
+}
+const beadSprites = {};
+function beadSprite(color, radius){
+  const key = color + '_' + radius;
+  if(beadSprites[key]) return beadSprites[key];
+  const c = document.createElement('canvas');
+  const d = radius*2 + 8;
+  c.width = c.height = d;
+  const x = c.getContext('2d');
+  const cx = radius+4, cy = radius+4;
+  const grad = x.createRadialGradient(cx-radius*0.35, cy-radius*0.35, radius*0.15, cx, cy, radius);
+  grad.addColorStop(0, shadeColor(color,0.55));
+  grad.addColorStop(0.55, color);
+  grad.addColorStop(1, shadeColor(color,-0.4));
+  x.beginPath();
+  x.arc(cx, cy, radius, 0, Math.PI*2);
+  x.fillStyle = grad;
+  x.fill();
+  x.lineWidth = 1;
+  x.strokeStyle = 'rgba(0,0,0,0.25)';
+  x.stroke();
+  beadSprites[key] = c;
+  return c;
+}
+
 function getPulsePeriod(elapsed){
-  const p = clamp(elapsed / RAMP_TIME, 0, 1);
-  return PERIOD_START + (PERIOD_MIN - PERIOD_START) * p;
+  return SHIFT_TIME;
 }
-function currentPolarity(elapsed, offset, period){
-  const phase = (((elapsed+offset) % period) + period) % period;
-  return phase < period/2 ? CYAN : MAGENTA;
+function currentPolarity(elapsed, offset){
+  const phase = (((elapsed+offset) % CYCLE) + CYCLE) % CYCLE;
+  return COLORS[Math.floor(phase / SHIFT_TIME) % COLORS.length];
 }
-function timeToShift(elapsed, offset, period){
-  const phase = (((elapsed+offset) % period) + period) % period;
-  const half = period/2;
-  return phase < half ? (half-phase) : (period-phase);
+function timeToShift(elapsed, offset){
+  const phase = (((elapsed+offset) % CYCLE) + CYCLE) % CYCLE;
+  const within = phase % SHIFT_TIME;
+  return SHIFT_TIME - within;
 }
 
 // ---------- world / camera ----------
@@ -459,7 +516,7 @@ function makeSnake(x,y,color,len,isPlayer){
     x, y, angle: rand(0,Math.PI*2),
     color, len, isPlayer,
     speed: isPlayer ? PLAYER_SPEED : BASE_SPEED, boostT:0,
-    pulseOffset: isPlayer?0:rand(0,9000),
+    pulseOffset: isPlayer?0:rand(0,CYCLE),
     trail: [{x,y}],
     alive:true, aiTarget:null, flash:0
   };
@@ -469,9 +526,11 @@ let player, bots, orbs, particles, running, initialized, score, mx, my, pointerA
 
 function spawnOrb(){
   const isPrism = Math.random() < 0.025;
+  const matchColor = player && player.color ? player.color : COLORS[0];
+  const pick = Math.random() < 0.4 ? matchColor : COLORS[Math.floor(Math.random()*COLORS.length)];
   return {
     x: rand(40, WORLD_W-40), y: rand(40, WORLD_H-40),
-    color: isPrism ? 'gold' : (Math.random() < 0.5 ? CYAN : MAGENTA),
+    color: isPrism ? 'gold' : pick,
     r: isPrism ? 10 : rand(4,6),
     wobble: rand(0, Math.PI*2),
     prism: isPrism
@@ -486,7 +545,7 @@ function explodePrism(x,y){
     orbs.push({
       x: clamp(x+Math.cos(ang)*d, 30, WORLD_W-30),
       y: clamp(y+Math.sin(ang)*d, 30, WORLD_H-30),
-      color: Math.random()<0.5?CYAN:MAGENTA,
+      color: COLORS[Math.floor(Math.random()*COLORS.length)],
       r: rand(4,6), wobble: rand(0,Math.PI*2), prism:false
     });
   }
@@ -649,12 +708,12 @@ function segCollide(px,py,sn,skip){
   return false;
 }
 
-function checkSnakeCollisions(elapsed, period){
+function checkSnakeCollisions(elapsed){
   const overloadActive = elapsed < (player.overloadUntil||0);
   for(const b of bots){
     if(!b.alive) continue;
     if(segCollide(player.x,player.y,b,0)){
-      const botColor = currentPolarity(elapsed, b.pulseOffset, period);
+      const botColor = currentPolarity(elapsed, b.pulseOffset);
       if(botColor === player.color || overloadActive){
         b.len = Math.max(MIN_LEN, b.len - (overloadActive?1.2:0.4));
         player.len += overloadActive?0.8:0.3;
@@ -822,33 +881,16 @@ function drawOrb(o,t){
     ctx.beginPath();
     ctx.arc(sx, sy+bob, rad, 0, Math.PI*2);
     ctx.fillStyle = grad;
-    ctx.shadowColor = '#ffd23f';
-    ctx.shadowBlur = 22;
     ctx.fill();
-    ctx.shadowBlur = 0;
     return;
   }
-  ctx.beginPath();
-  ctx.arc(sx, sy+bob, o.r, 0, Math.PI*2);
-  ctx.fillStyle = o.color;
-  ctx.shadowColor = o.color;
-  ctx.shadowBlur = 14;
-  ctx.fill();
-  ctx.shadowBlur = 0;
+  const sp = orbSprite(o.color, o.r);
+  ctx.drawImage(sp, sx - sp.width/2, sy + bob - sp.height/2);
 }
 
 function drawBead(sx,sy,radius,color){
-  const grad = ctx.createRadialGradient(sx-radius*0.35, sy-radius*0.35, radius*0.15, sx, sy, radius);
-  grad.addColorStop(0, shadeColor(color,0.55));
-  grad.addColorStop(0.55, color);
-  grad.addColorStop(1, shadeColor(color,-0.4));
-  ctx.beginPath();
-  ctx.arc(sx,sy,radius,0,Math.PI*2);
-  ctx.fillStyle = grad;
-  ctx.fill();
-  ctx.lineWidth = 1;
-  ctx.strokeStyle = 'rgba(0,0,0,0.25)';
-  ctx.stroke();
+  const sp = beadSprite(color, radius);
+  ctx.drawImage(sp, sx - sp.width/2, sy - sp.height/2);
 }
 
 function drawPhaseSight(sn){
@@ -880,8 +922,6 @@ function drawSnake3D(sn, isPlayer, overrideColor){
   if(pts.length < 2) return;
   const col = overrideColor || sn.color;
   const glow = isPlayer ? 16 : 8;
-  ctx.shadowColor = col;
-  ctx.shadowBlur = glow;
   const step = 4;
   for(let i=pts.length-1;i>=0;i-=step){
     const p = pts[i];
@@ -889,7 +929,6 @@ function drawSnake3D(sn, isPlayer, overrideColor){
     if(sx < -20 || sx > W+20 || sy < -20 || sy > H+20) continue;
     drawBead(sx, sy, 8.2, col);
   }
-  ctx.shadowBlur = 0;
 
   const {sx:hx, sy:hy} = toScreen(sn.x, sn.y);
   ctx.shadowColor = col; ctx.shadowBlur = glow+6;
@@ -946,31 +985,35 @@ function drawMinimap(){
   ctx.beginPath(); ctx.arc(cx,cy,R,0,Math.PI*2); ctx.clip();
   ctx.fillStyle = 'rgba(10,14,26,0.6)';
   ctx.fillRect(cx-R,cy-R,R*2,R*2);
+  const px = Math.round(player.x), py = Math.round(player.y);
   for(const o of orbs){
-    const dx=o.x-player.x, dy=o.y-player.y;
+    const dx=o.x-px, dy=o.y-py;
     if(dx*dx+dy*dy > range*range) continue;
-    ctx.beginPath(); ctx.arc(cx+dx*scale, cy+dy*scale, 2.2, 0, Math.PI*2);
-    ctx.fillStyle = o.prism ? '#ffd23f' : o.color; ctx.fill();
+    ctx.fillStyle = o.prism ? '#ffd23f' : o.color;
+    ctx.fillRect(cx+dx*scale-1, cy+dy*scale-1, 2, 2);
   }
   for(const b of bots){
-    const dx=b.x-player.x, dy=b.y-player.y;
+    const dx=b.x-px, dy=b.y-py;
     if(dx*dx+dy*dy > range*range) continue;
-    ctx.beginPath(); ctx.arc(cx+dx*scale, cy+dy*scale, 3, 0, Math.PI*2);
-    ctx.fillStyle = b.color; ctx.fill();
+    ctx.fillStyle = b.color;
+    ctx.fillRect(cx+dx*scale-2, cy+dy*scale-2, 4, 4);
   }
-  ctx.beginPath(); ctx.arc(cx,cy,4,0,Math.PI*2); ctx.fillStyle = '#fff'; ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(cx-2, cy-2, 4, 4);
   ctx.restore();
-  ctx.beginPath(); ctx.arc(cx,cy,R,0,Math.PI*2);
-  ctx.strokeStyle = 'rgba(255,70,70,0.55)'; ctx.lineWidth = 2; ctx.stroke();
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,70,70,0.55)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(cx,cy,R,0,Math.PI*2); ctx.stroke();
+  ctx.restore();
 }
 
 // ---------- HUD ----------
 const ring = document.getElementById('polarityRing');
 const polLabel = document.getElementById('polarityLabel');
 const overloadBanner = document.getElementById('overloadBanner');
-function updatePolarityHUD(elapsed, period){
-  const col = currentPolarity(elapsed, 0, period);
-  const ttl = timeToShift(elapsed, 0, period);
+function updatePolarityHUD(elapsed){
+  const col = currentPolarity(elapsed, 0);
+  const ttl = timeToShift(elapsed, 0);
   const warning = ttl < 700;
   ring.style.borderColor = col;
   ring.style.boxShadow = `0 0 ${warning ? 30 : 18}px ${col}`;
@@ -993,9 +1036,8 @@ function loop(t){
       updateDuelFrame();
     } else {
       const elapsed = t - roundStart;
-      const period = getPulsePeriod(elapsed);
-      player.color = currentPolarity(elapsed, 0, period);
-      updatePolarityHUD(elapsed, period);
+      player.color = currentPolarity(elapsed, 0);
+      updatePolarityHUD(elapsed);
       updateOverloadBanner(elapsed);
 
       if(keys.ArrowLeft || keys.KeyA || keys.ArrowRight || keys.KeyD ||
@@ -1020,13 +1062,13 @@ function loop(t){
       checkOrbEat(player, true, elapsed);
 
       for(const b of bots){
-        b.color = currentPolarity(elapsed, b.pulseOffset, period);
+        b.color = currentPolarity(elapsed, b.pulseOffset);
         updateAI(b);
         checkOrbEat(b, false, elapsed);
         respawnBotIfDead(b);
       }
 
-      if(running && !duel) checkSnakeCollisions(elapsed, period);
+      if(running && !duel) checkSnakeCollisions(elapsed);
     }
   }
 
