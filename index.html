@@ -589,6 +589,7 @@ function addParticles(x,y,color,n){
 
 // ---------- input ----------
 pointerActive = false;
+let pointerHeld = false;
 let lastPointerMove = 0;
 let keys = {};
 function setPointer(clientX, clientY){
@@ -601,9 +602,12 @@ canvas.addEventListener('mousemove', e=> setPointer(e.clientX, e.clientY));
 canvas.addEventListener('touchstart', e=>{
   e.preventDefault();
   attemptDuel();
+  pointerHeld = true;
   const t=e.touches[0]; setPointer(t.clientX,t.clientY);
 }, {passive:false});
 canvas.addEventListener('touchmove', e=>{ e.preventDefault(); const t=e.touches[0]; setPointer(t.clientX,t.clientY); }, {passive:false});
+canvas.addEventListener('touchend', e=>{ e.preventDefault(); pointerHeld = false; }, {passive:false});
+canvas.addEventListener('touchcancel', e=>{ e.preventDefault(); pointerHeld = false; }, {passive:false});
 canvas.addEventListener('click', ()=> attemptDuel());
 window.addEventListener('keydown', e=>{
   keys[e.code] = true;
@@ -618,8 +622,8 @@ function steerSnake(sn, targetAngleFn, speed){
   let diff = desired - sn.angle;
   while(diff > Math.PI) diff -= Math.PI*2;
   while(diff < -Math.PI) diff += Math.PI*2;
-  const maxTurn = 0.14;
-  sn.angle += Math.max(-maxTurn, Math.min(maxTurn, diff * 0.14));
+  const maxTurn = 0.16;
+  sn.angle += Math.max(-maxTurn, Math.min(maxTurn, diff * 0.18));
   sn.x += Math.cos(sn.angle)*speed;
   sn.y += Math.sin(sn.angle)*speed;
   sn.trail.unshift({x:sn.x, y:sn.y});
@@ -821,35 +825,45 @@ function resolveDuel(success){
 }
 
 // ---------- render ----------
+let bgCanvas = null, bgCanvasPad = 120;
+function buildBgCanvas(){
+  bgCanvas = document.createElement('canvas');
+  bgCanvas.width = W + bgCanvasPad*2;
+  bgCanvas.height = H + bgCanvasPad*2;
+  const c = bgCanvas.getContext('2d');
+  c.fillStyle = '#070a12';
+  c.fillRect(0,0,bgCanvas.width,bgCanvas.height);
+  if(bgType === 'neon'){
+    c.strokeStyle = 'rgba(255,47,208,0.3)';
+    c.lineWidth = 1;
+    const gs = 46;
+    for(let x=-gs; x<bgCanvas.width+gs; x+=gs){ c.beginPath(); c.moveTo(x,0); c.lineTo(x,bgCanvas.height); c.stroke(); }
+    for(let y=-gs; y<bgCanvas.height+gs; y+=gs){ c.beginPath(); c.moveTo(0,y); c.lineTo(bgCanvas.width,y); c.stroke(); }
+  } else if(hexPattern){
+    for(let x=-hexPatW; x<bgCanvas.width+hexPatW; x+=hexPatW){
+      for(let y=-hexPatH; y<bgCanvas.height+hexPatH; y+=hexPatH){
+        c.drawImage(hexPattern, x, y);
+      }
+    }
+  }
+  const g = c.createRadialGradient(bgCanvas.width/2,bgCanvas.height/2,H*0.35,bgCanvas.width/2,bgCanvas.height/2,H*0.8);
+  g.addColorStop(0,'rgba(0,0,0,0)');
+  g.addColorStop(1,'rgba(0,0,0,0.35)');
+  c.fillStyle = g;
+  c.fillRect(0,0,bgCanvas.width,bgCanvas.height);
+}
+window.addEventListener('resize', buildBgCanvas);
+buildBgCanvas();
+
 function drawGrid(){
   ctx.fillStyle = '#070a12';
   ctx.fillRect(0,0,W,H);
 
-  if(bgType === 'neon'){
-    ctx.strokeStyle = 'rgba(255,47,208,0.3)';
-    ctx.lineWidth = 1;
-    const gs = 46;
-    const offX = ((-camera.x)%gs+gs)%gs;
-    const offY = ((-camera.y)%gs+gs)%gs;
-    for(let x=-gs; x<W+gs; x+=gs){ ctx.beginPath(); ctx.moveTo(x+offX,0); ctx.lineTo(x+offX,H); ctx.stroke(); }
-    for(let y=-gs; y<H+gs; y+=gs){ ctx.beginPath(); ctx.moveTo(0,y+offY); ctx.lineTo(W,y+offY); ctx.stroke(); }
-  } else {
-    if(hexPattern){
-      const ox = ((-camera.x*0.5)%hexPatW+hexPatW)%hexPatW;
-      const oy = ((-camera.y*0.5)%hexPatH+hexPatH)%hexPatH;
-      for(let x=-hexPatW+ox; x<W+hexPatW; x+=hexPatW){
-        for(let y=-hexPatH+oy; y<H+hexPatH; y+=hexPatH){
-          ctx.drawImage(hexPattern, x, y);
-        }
-      }
-    }
+  if(bgCanvas){
+    const offX = bgType==='neon' ? ((-camera.x)%46+46)%46 : ((-camera.x*0.5)%hexPatW+hexPatW)%hexPatW;
+    const offY = bgType==='neon' ? ((-camera.y)%46+46)%46 : ((-camera.y*0.5)%hexPatH+hexPatH)%hexPatH;
+    ctx.drawImage(bgCanvas, offX-bgCanvasPad, offY-bgCanvasPad);
   }
-
-  const g = ctx.createRadialGradient(W/2,H/2,H*0.35,W/2,H/2,H*0.8);
-  g.addColorStop(0,'rgba(0,0,0,0)');
-  g.addColorStop(1,'rgba(0,0,0,0.35)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0,0,W,H);
 
   if(initialized) drawGlowingBoundary(performance.now());
 }
@@ -1048,7 +1062,7 @@ function loop(t){
         const kSpeed = (keys.ArrowUp || keys.KeyW) ? BOOST_SPEED : PLAYER_SPEED;
         steerSnake(player, ()=> kAngle, kSpeed);
         pointerActive = false;
-      } else if(pointerActive && (performance.now() - lastPointerMove < 400)){
+      } else if(pointerActive && (pointerHeld || (performance.now() - lastPointerMove < 400))){
         steerSnake(player, ()=> Math.atan2(my-player.y, mx-player.x), player.speed);
       } else {
         steerSnake(player, ()=> player.angle, PLAYER_SPEED * 0.7);
@@ -1173,6 +1187,7 @@ document.querySelectorAll('.bgOption').forEach(function(el){
     bgType = el.dataset.bg;
     sdkSave('bgType', bgType);
     drawBgPreviews();
+    buildBgCanvas();
   });
 });
 
