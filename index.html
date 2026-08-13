@@ -325,13 +325,13 @@ resize();
 const CYAN = '#00eaff';
 const MAGENTA = '#ff2fd0';
 const BASE_SPEED = 2.4;
-const PLAYER_SPEED = 2.8;
-const BOOST_SPEED = 4.0;
+const PLAYER_SPEED = 3.1;
+const BOOST_SPEED = 4.4;
 const START_LEN = 26;
 const GROW_AMT = 6;
 const SHRINK_AMT = 8;
 const MIN_LEN = 8;
-const ORB_COUNT = 170;
+const ORB_COUNT = 220;
 const BOT_COUNT = 7;
 
 const COLORS = [
@@ -527,7 +527,7 @@ let player, bots, orbs, particles, running, initialized, score, mx, my, pointerA
 function spawnOrb(){
   const isPrism = Math.random() < 0.025;
   const matchColor = player && player.color ? player.color : COLORS[0];
-  const pick = Math.random() < 0.4 ? matchColor : COLORS[Math.floor(Math.random()*COLORS.length)];
+  const pick = Math.random() < 0.5 ? matchColor : COLORS[Math.floor(Math.random()*COLORS.length)];
   return {
     x: rand(40, WORLD_W-40), y: rand(40, WORLD_H-40),
     color: isPrism ? 'gold' : pick,
@@ -535,6 +535,14 @@ function spawnOrb(){
     wobble: rand(0, Math.PI*2),
     prism: isPrism
   };
+}
+function spawnOrbNear(px, py){
+  const a = rand(0, Math.PI*2);
+  const d = rand(15, W*0.9);
+  const o = spawnOrb();
+  o.x = clamp(px + Math.cos(a)*d, 30, WORLD_W-30);
+  o.y = clamp(py + Math.sin(a)*d, 30, WORLD_H-30);
+  return o;
 }
 
 function explodePrism(x,y){
@@ -567,7 +575,9 @@ function initGame(){
     bots.push(makeSnake(rand(150,WORLD_W-150), rand(150,WORLD_H-150), CYAN, rand(16,30), false));
   }
   orbs = [];
-  for(let i=0;i<ORB_COUNT;i++) orbs.push(spawnOrb());
+  for(let i=0;i<ORB_COUNT;i++){
+    orbs.push(i < ORB_COUNT*0.5 ? spawnOrbNear(player.x, player.y) : spawnOrb());
+  }
   particles = [];
   score = 0;
   running = true;
@@ -617,13 +627,14 @@ window.addEventListener('keydown', e=>{
 window.addEventListener('keyup', e=>{ keys[e.code] = false; });
 
 // ---------- update ----------
+let frameDt = 1;
 function steerSnake(sn, targetAngleFn, speed){
   const desired = targetAngleFn();
   let diff = desired - sn.angle;
   while(diff > Math.PI) diff -= Math.PI*2;
   while(diff < -Math.PI) diff += Math.PI*2;
-  const maxTurn = 0.16;
-  sn.angle += Math.max(-maxTurn, Math.min(maxTurn, diff * 0.18));
+  const maxTurn = 0.16 * frameDt;
+  sn.angle += Math.max(-maxTurn, Math.min(maxTurn, diff * 0.18 * frameDt));
   sn.x += Math.cos(sn.angle)*speed;
   sn.y += Math.sin(sn.angle)*speed;
   sn.trail.unshift({x:sn.x, y:sn.y});
@@ -698,7 +709,7 @@ function checkOrbEat(sn, isPlayer, elapsed){
         addParticles(o.x,o.y,o.color,6);
       }
       orbs.splice(i,1);
-      if(orbs.length < ORB_COUNT*1.6) orbs.push(spawnOrb());
+      if(orbs.length < ORB_COUNT*1.4) orbs.push(isPlayer ? spawnOrbNear(player.x, player.y) : spawnOrb());
       break;
     }
   }
@@ -1041,8 +1052,11 @@ function updateOverloadBanner(elapsed){
 }
 
 // ---------- main loop ----------
+let loopLast = 0;
 function loop(t){
   requestAnimationFrame(loop);
+  frameDt = clamp((t - (loopLast||t)) / 16.7, 0.25, 2.5);
+  loopLast = t;
   if(!initialized){ drawGrid(); return; }
 
   if(running && !paused){
