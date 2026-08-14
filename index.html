@@ -369,20 +369,20 @@ const START_LEN = 30;
 const GROW_AMT = 6;
 const SHRINK_AMT = 8;
 const MIN_LEN = 8;
-const ORB_COUNT = 220;
+const ORB_COUNT = 140;
 const BOT_COUNT = 7;
 
 const COLORS = [
   '#ff0000',
-  '#00ff00',
-  '#0000ff',
-  '#ffff00',
-  '#ff00ff',
+  '#ff9900',
+  '#ccff00',
+  '#33ff00',
+  '#00ff66',
   '#00ffff',
-  '#ff8000',
+  '#0066ff',
+  '#3300ff',
   '#cc00ff',
-  '#80ff00',
-  '#ff007f'
+  '#ff0099'
 ];
 const SHIFT_TIME = 30000;
 const CYCLE = SHIFT_TIME * COLORS.length;
@@ -544,8 +544,15 @@ buildHexPattern();
 window.addEventListener('resize', buildHexPattern);
 
 let camera = {x:0, y:0};
+const _scr = {sx:0, sy:0};
 function toScreen(x,y){
-  return { sx: x - camera.x + W/2, sy: y - camera.y + H/2 };
+  // reuses one shared object instead of allocating a new {sx,sy} every call —
+  // this function runs hundreds of times per frame (per orb, per body bead,
+  // per particle), so avoiding the allocation cuts GC pauses that were
+  // causing stutter on lower-end mobile devices
+  _scr.sx = x - camera.x + W/2;
+  _scr.sy = y - camera.y + H/2;
+  return _scr;
 }
 
 // ---------- entities ----------
@@ -562,23 +569,62 @@ function makeSnake(x,y,color,len,isPlayer){
 
 let player, bots, orbs, particles, running, initialized, score, mx, my, pointerActive, roundStart, duel;
 
+const ORB_MIN_GAP = 15;
+function pickOrbColor(){
+  // favor the color the player currently needs, so the field visibly
+  // shifts toward whatever color the snake is on
+  if(player && Math.random() < 0.45) return player.color;
+  return COLORS[Math.floor(Math.random()*COLORS.length)];
+}
+function findOrbSpot(cx, cy, range){
+  let x = cx, y = cy;
+  for(let tries=0; tries<5; tries++){
+    if(range){
+      const a = rand(0, Math.PI*2), d = rand(15, range);
+      x = clamp(cx + Math.cos(a)*d, 30, WORLD_W-30);
+      y = clamp(cy + Math.sin(a)*d, 30, WORLD_H-30);
+    } else {
+      x = rand(40, WORLD_W-40);
+      y = rand(40, WORLD_H-40);
+    }
+    let clash = false;
+    for(let i=0;i<orbs.length;i++){
+      const o = orbs[i];
+      const gap = ORB_MIN_GAP + o.r;
+      if(dist2(x,y,o.x,o.y) < gap*gap){ clash = true; break; }
+    }
+    if(!clash) break;
+  }
+  return {x,y};
+}
 function spawnOrb(){
   const isPrism = Math.random() < 0.025;
+  const r = isPrism ? 10 : rand(4,6);
+  const spot = findOrbSpot(0,0,0);
   return {
-    x: rand(40, WORLD_W-40), y: rand(40, WORLD_H-40),
-    color: isPrism ? 'gold' : COLORS[Math.floor(Math.random()*COLORS.length)],
-    r: isPrism ? 10 : rand(4,6),
-    wobble: rand(0, Math.PI*2),
-    prism: isPrism
+    x: spot.x, y: spot.y,
+    color: isPrism ? 'gold' : pickOrbColor(),
+    r, wobble: rand(0, Math.PI*2), prism: isPrism
   };
 }
 function spawnOrbNear(px, py){
-  const a = rand(0, Math.PI*2);
-  const d = rand(15, W*0.9);
-  const o = spawnOrb();
-  o.x = clamp(px + Math.cos(a)*d, 30, WORLD_W-30);
-  o.y = clamp(py + Math.sin(a)*d, 30, WORLD_H-30);
-  return o;
+  const isPrism = Math.random() < 0.025;
+  const r = isPrism ? 10 : rand(4,6);
+  const spot = findOrbSpot(px, py, W*0.9);
+  return {
+    x: spot.x, y: spot.y,
+    color: isPrism ? 'gold' : pickOrbColor(),
+    r, wobble: rand(0, Math.PI*2), prism: isPrism
+  };
+}
+function rebiasOrbs(newColor){
+  // when the color shift happens, repaint a portion of the already-spawned
+  // orbs so the field noticeably favors the snake's new color right away
+  for(let i=0;i<orbs.length;i++){
+    const o = orbs[i];
+    if(o.prism) continue;
+    o.color = Math.random() < 0.5 ? newColor : COLORS[Math.floor(Math.random()*COLORS.length)];
+  }
 }
 
 function explodePrism(x,y){
@@ -589,7 +635,7 @@ function explodePrism(x,y){
     orbs.push({
       x: clamp(x+Math.cos(ang)*d, 30, WORLD_W-30),
       y: clamp(y+Math.sin(ang)*d, 30, WORLD_H-30),
-      color: COLORS[Math.floor(Math.random()*COLORS.length)],
+      color: pickOrbColor(),
       r: rand(4,6), wobble: rand(0,Math.PI*2), prism:false
     });
   }
@@ -924,18 +970,26 @@ function drawGrid(){
     ctx.drawImage(bgCanvas, offX-bgCanvasPad, offY-bgCanvasPad);
   }
 
-  if(initialized) drawGlowingBoundary(performance.now());
+  // the boundary glow uses an expensive shadowBlur stroke every frame — only
+  // pay that cost when the camera is actually close enough to an edge for
+  // it to be visible, instead of computing it on every frame regardless
+  if(initialized){
+    const margin = 500;
+    const nearEdge = camera.x < margin || camera.x > WORLD_W-margin || camera.y < margin || camera.y > WORLD_H-margin;
+    if(nearEdge) drawGlowingBoundary(performance.now());
+  }
 }
 
 function drawGlowingBoundary(t){
-  const p1 = toScreen(0,0), p2 = toScreen(WORLD_W, WORLD_H);
+  const x1 = 0 - camera.x + W/2, y1 = 0 - camera.y + H/2;
+  const x2 = WORLD_W - camera.x + W/2, y2 = WORLD_H - camera.y + H/2;
   const pulse = 0.5 + Math.sin(t * 0.003) * 0.3;
   ctx.save();
   ctx.shadowColor = 'rgba(0,234,255,' + pulse + ')';
   ctx.shadowBlur = 20 + pulse * 15;
   ctx.strokeStyle = 'rgba(0,234,255,' + (0.3 + pulse*0.3) + ')';
   ctx.lineWidth = 3;
-  ctx.strokeRect(p1.sx, p1.sy, p2.sx-p1.sx, p2.sy-p1.sy);
+  ctx.strokeRect(x1, y1, x2-x1, y2-y1);
   ctx.shadowBlur = 0;
   ctx.restore();
 }
@@ -1092,7 +1146,7 @@ function updatePolarityHUD(elapsed){
   ring.style.boxShadow = `0 0 ${warning ? 30 : 18}px ${col}`;
   polLabel.textContent = 'SHIFT ' + (ttl/1000).toFixed(1) + 's';
   polLabel.style.color = warning ? '#fff' : 'var(--text)';
-  if(col !== prevPolarity){ sfxShift(); prevPolarity = col; }
+  if(col !== prevPolarity){ sfxShift(); prevPolarity = col; rebiasOrbs(col); }
 }
 function updateOverloadBanner(elapsed){
   if(elapsed < (player.overloadUntil||0)) overloadBanner.classList.add('show');
