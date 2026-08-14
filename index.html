@@ -363,9 +363,9 @@ resize();
 const CYAN = '#00eaff';
 const MAGENTA = '#ff2fd0';
 const BASE_SPEED = 2.4;
-const PLAYER_SPEED = 3.1;
-const BOOST_SPEED = 4.4;
-const START_LEN = 26;
+const PLAYER_SPEED = 3.4;
+const BOOST_SPEED = 4.8;
+const START_LEN = 30;
 const GROW_AMT = 6;
 const SHRINK_AMT = 8;
 const MIN_LEN = 8;
@@ -640,7 +640,13 @@ let lastPointerMove = 0;
 let keys = {};
 function setPointer(clientX, clientY){
   const rect = canvas.getBoundingClientRect();
-  mx = clientX - rect.left; my = clientY - rect.top;
+  const screenX = (clientX - rect.left) * (canvas.width / rect.width);
+  const screenY = (clientY - rect.top) * (canvas.height / rect.height);
+  // convert screen-space pointer into world-space coordinates using the
+  // current camera offset, since the player (and steering target) live in
+  // world space while the raw pointer/touch position is screen space.
+  mx = screenX + camera.x - W/2;
+  my = screenY + camera.y - H/2;
   pointerActive = true;
   lastPointerMove = performance.now();
 }
@@ -669,10 +675,16 @@ function steerSnake(sn, targetAngleFn, speed){
   let diff = desired - sn.angle;
   while(diff > Math.PI) diff -= Math.PI*2;
   while(diff < -Math.PI) diff += Math.PI*2;
-  const maxTurn = 0.16 * frameDt;
-  sn.angle += Math.max(-maxTurn, Math.min(maxTurn, diff * 0.18 * frameDt));
-  sn.x += Math.cos(sn.angle)*speed;
-  sn.y += Math.sin(sn.angle)*speed;
+  // direct clamp to a max turn speed (no extra gain damping) — this is what
+  // makes the head track the pointer tightly and immediately for small
+  // corrections, while still capping sharp turns so it doesn't snap-spin
+  const maxTurn = 0.11 * frameDt;
+  sn.angle += Math.max(-maxTurn, Math.min(maxTurn, diff));
+  // scale actual travel distance by frameDt too, otherwise a 30fps device
+  // advances the same distance per frame as a 60fps device and effectively
+  // moves at double real-world speed with choppier steps
+  sn.x += Math.cos(sn.angle)*speed*frameDt;
+  sn.y += Math.sin(sn.angle)*speed*frameDt;
   sn.trail.unshift({x:sn.x, y:sn.y});
   const maxPts = Math.ceil(sn.len)*2;
   while(sn.trail.length > maxPts) sn.trail.pop();
@@ -983,25 +995,25 @@ function drawSnake3D(sn, isPlayer, overrideColor){
   if(pts.length < 2) return;
   const col = overrideColor || sn.color;
   const glow = isPlayer ? 16 : 8;
-  const step = 4;
+  const step = 3;
   for(let i=pts.length-1;i>=0;i-=step){
     const p = pts[i];
     const {sx,sy} = toScreen(p.x,p.y);
     if(sx < -20 || sx > W+20 || sy < -20 || sy > H+20) continue;
-    drawBead(sx, sy, 8.2, col);
+    drawBead(sx, sy, 11, col);
   }
 
   const {sx:hx, sy:hy} = toScreen(sn.x, sn.y);
   ctx.shadowColor = col; ctx.shadowBlur = glow+6;
-  drawBead(hx, hy, 10.2, col);
+  drawBead(hx, hy, 13.5, col);
   ctx.shadowBlur = 0;
 
   const a1 = sn.angle - 0.55, a2 = sn.angle + 0.55;
-  const eyePts = [[hx+Math.cos(a1)*6.2, hy+Math.sin(a1)*6.2],[hx+Math.cos(a2)*6.2, hy+Math.sin(a2)*6.2]];
+  const eyePts = [[hx+Math.cos(a1)*8.2, hy+Math.sin(a1)*8.2],[hx+Math.cos(a2)*8.2, hy+Math.sin(a2)*8.2]];
   for(const [ex,ey] of eyePts){
-    ctx.beginPath(); ctx.arc(ex,ey,3.1,0,Math.PI*2); ctx.fillStyle = '#fff'; ctx.fill();
+    ctx.beginPath(); ctx.arc(ex,ey,4.1,0,Math.PI*2); ctx.fillStyle = '#fff'; ctx.fill();
     ctx.beginPath();
-    ctx.arc(ex+Math.cos(sn.angle)*1.1, ey+Math.sin(sn.angle)*1.1, 1.4, 0, Math.PI*2);
+    ctx.arc(ex+Math.cos(sn.angle)*1.4, ey+Math.sin(sn.angle)*1.4, 1.9, 0, Math.PI*2);
     ctx.fillStyle = '#111'; ctx.fill();
   }
 
@@ -1117,7 +1129,7 @@ function loop(t){
       } else {
         steerSnake(player, ()=> player.angle, PLAYER_SPEED * 0.7);
       }
-      if(player.boostT>0){ player.boostT--; if(player.boostT<=0) player.speed = PLAYER_SPEED; }
+      if(player.boostT>0){ player.boostT -= frameDt; if(player.boostT<=0) player.speed = PLAYER_SPEED; }
 
       camera.x += (player.x - camera.x)*0.12;
       camera.y += (player.y - camera.y)*0.12;
