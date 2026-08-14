@@ -152,10 +152,12 @@
     <div class="howToPlayContent">
       <h3>HOW TO PLAY</h3>
       <p>Colors shift through <b>10 different hues</b>, changing <b>every 30 seconds</b>.</p>
-      <p>Eat <b>matching orbs</b> to grow. <span class="g">Mismatched enemies</span> are lethal on contact.</p>
-      <p><span class="g">Overload:</span> eat two different colors within a few seconds for temporary golden invincibility.</p>
+      <p>Eat <b>matching orbs</b> to grow. <span class="g">Mismatched enemies</span> shrink you.</p>
+      <p><span class="g">Danger:</span> shrink to minimum size and your snake dies!</p>
+      <p><span class="g">Overload:</span> eat two different colors within a few seconds for temporary golden invincibility (5s).</p>
       <p><span class="g">Duel:</span> collide with a mismatched enemy and you get one timing-based chance to survive instead of instant death.</p>
-      <p><span class="g">Prism orbs</span> explode into a burst of orbs when eaten.</p>
+      <p><span class="g">Prism orbs</span> explode into a burst of orbs when eaten and give a big growth + score boost.</p>
+      <p><span class="g">Star ★</span> gives <span class="g">double score</span> for 7s. <span class="g">Magnet 🧲</span> pulls nearby orbs to you for 5s.</p>
       <p><b>Controls:</b><br>
       Mouse / Touch: steer toward cursor<br>
       Arrow Keys / WASD: steer<br>
@@ -188,6 +190,7 @@
     <div id="bigScore">0</div>
     <div id="statLine">Best: 0</div>
     <button class="btn" id="retryBtn" style="margin-top:22px;">RETRY</button>
+    <button class="btn" id="doubleBtn" style="margin-top:8px;background:linear-gradient(90deg,rgba(255,140,0,0.2),rgba(255,210,63,0.2));border-color:rgba(255,210,63,0.3);">DOUBLE SCORE (AD)</button>
     <button class="btn" id="reviveBtn" style="margin-top:8px;background:linear-gradient(90deg,rgba(255,210,63,0.2),rgba(255,157,0,0.2));border-color:rgba(255,210,63,0.3);">REVIVE (AD)</button>
   </div>
 
@@ -199,17 +202,26 @@
 "use strict";
 
 // ---------- YouTube SDK ----------
-let paused = false, _adShowing = false, sdkReady = false;
+let paused = false, _adShowing = false, sdkReady = false, initialAdShown = false;
 
 function sdkInit(){
   try {
     if(typeof ytgame !== 'undefined'){
-      ytgame.ready(function(){
+      const boot = function(){
         sdkReady = true;
-        try { ytgame.game.gameReady(); } catch(e){}
         try { ytgame.game.firstFrameReady(); } catch(e){}
+        try { ytgame.game.gameReady(); } catch(e){}
+        try {
+          var en = ytgame.system.isAudioEnabled();
+          if(bgmGain) bgmGain.gain.value = en ? bgmVolume : 0;
+        } catch(e){}
         loadBgFromSDK();
-      });
+      };
+      if(typeof ytgame.ready === 'function'){
+        ytgame.ready(boot);
+      } else {
+        boot();
+      }
       ytgame.system.onPause(function(){ if(!paused){ paused = true; platformPause(); }});
       ytgame.system.onResume(function(){ if(paused){ paused = false; platformResume(); }});
       ytgame.system.onAudioEnabledChange(function(en){
@@ -222,22 +234,46 @@ function sdkSave(key, val){
   try { if(sdkReady && typeof ytgame !== 'undefined') ytgame.game.saveData(JSON.stringify({[key]: val})); } catch(e){}
 }
 function sdkLoad(key, cb){
-  try { if(sdkReady && typeof ytgame !== 'undefined') ytgame.game.loadData(function(d){
+  try { if(sdkReady && typeof ytgame !== 'undefined') ytgame.game.loadData().then(function(d){
     try { var o = JSON.parse(d); cb(o[key]); } catch(e){ cb(null); }
-  }); } catch(e){ cb(null); }
+  }).catch(function(){ cb(null); }); } catch(e){ cb(null); }
 }
 function sdkScoreVal(v){
   try { if(typeof ytgame !== 'undefined') ytgame.engagement.sendScore({value: Math.floor(v)}); } catch(e){}
 }
+function resumeAudioCtx(){
+  try{ if(audioCtx && audioCtx.state === 'suspended') audioCtx.resume(); }catch(e){}
+}
 function showInterlude(){
   if(_adShowing) return;
   _adShowing = true;
-  try { if(typeof ytgame !== 'undefined') ytgame.game.requestInterstitialAd({onAdComplete: function(){ _adShowing = false; }, onAdError: function(){ _adShowing = false; }}); } catch(e){ _adShowing = false; }
+  try {
+    if(typeof ytgame !== 'undefined' && ytgame.ads && typeof ytgame.ads.requestInterstitialAd === 'function'){
+      ytgame.ads.requestInterstitialAd().then(function(){ _adShowing = false; resumeAudioCtx(); }).catch(function(){ _adShowing = false; });
+    } else if(typeof ytgame !== 'undefined' && ytgame.game && typeof ytgame.game.requestInterstitialAd === 'function'){
+      ytgame.game.requestInterstitialAd({onAdComplete: function(){ _adShowing = false; resumeAudioCtx(); }, onAdError: function(){ _adShowing = false; }});
+    } else { _adShowing = false; }
+  } catch(e){ _adShowing = false; }
 }
-function showRewardedAd(onSuccess){
+function showInitialAd(){
+  if(initialAdShown || _adShowing) return;
+  initialAdShown = true;
+  showInterlude();
+}
+function showRewardedAd(rewardId, onSuccess){
   if(_adShowing) return;
   _adShowing = true;
-  try { if(typeof ytgame !== 'undefined') ytgame.game.requestRewardedAd({onAdComplete: function(){ _adShowing = false; if(onSuccess) onSuccess(); }, onAdError: function(){ _adShowing = false; }}); } catch(e){ _adShowing = false; }
+  try {
+    if(typeof ytgame !== 'undefined' && ytgame.ads && typeof ytgame.ads.requestRewardedAd === 'function'){
+      ytgame.ads.requestRewardedAd(rewardId).then(function(earned){
+        _adShowing = false;
+        resumeAudioCtx();
+        if(earned && onSuccess) onSuccess();
+      }).catch(function(){ _adShowing = false; resumeAudioCtx(); });
+    } else if(typeof ytgame !== 'undefined' && ytgame.game && typeof ytgame.game.requestRewardedAd === 'function'){
+      ytgame.game.requestRewardedAd({onAdComplete: function(){ _adShowing = false; resumeAudioCtx(); if(onSuccess) onSuccess(); }, onAdError: function(){ _adShowing = false; resumeAudioCtx(); }});
+    } else { _adShowing = false; if(onSuccess) onSuccess(); }
+  } catch(e){ _adShowing = false; if(onSuccess) onSuccess(); }
 }
 
 // ---------- Audio ----------
@@ -246,12 +282,16 @@ const bgmVolume = 0.28;
 let bgmOscs = [], bgmRunning = false, musicInterval = null;
 
 function initAudio(){
-  if(audioCtx) return;
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  bgmGain = audioCtx.createGain();
-  bgmGain.gain.value = bgmVolume;
-  bgmGain.connect(audioCtx.destination);
-  startBGM();
+  if(!audioCtx){
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    bgmGain = audioCtx.createGain();
+    bgmGain.gain.value = bgmVolume;
+    bgmGain.connect(audioCtx.destination);
+    startBGM();
+  }
+  if(audioCtx.state === 'suspended'){
+    try{ audioCtx.resume(); }catch(e){}
+  }
 }
 function playTone(freq, dur, type, vol, det){
   if(!audioCtx) return;
@@ -265,6 +305,8 @@ function playTone(freq, dur, type, vol, det){
 function sfxEat(){ playTone(600,0.12,'sine',0.15); playTone(900,0.08,'sine',0.1); }
 function sfxMismatch(){ playTone(150,0.2,'sawtooth',0.12); }
 function sfxPrism(){ playTone(800,0.15,'sine',0.12); playTone(1200,0.12,'sine',0.1); playTone(1600,0.1,'sine',0.08); }
+function sfxStar(){ playTone(700,0.12,'sine',0.14); playTone(1000,0.12,'sine',0.12); playTone(1300,0.18,'sine',0.1); }
+function sfxMagnet(){ playTone(300,0.2,'triangle',0.12); playTone(450,0.2,'triangle',0.1); }
 function sfxOverload(){ playTone(400,0.3,'sine',0.15); playTone(600,0.25,'sine',0.12); playTone(800,0.2,'sine',0.1); }
 function sfxDuelStart(){ playTone(500,0.15,'square',0.1); playTone(700,0.12,'square',0.08); }
 function sfxDuelWin(){ playTone(600,0.1,'sine',0.12); playTone(900,0.15,'sine',0.1); playTone(1200,0.2,'sine',0.08); }
@@ -388,7 +430,7 @@ const SHIFT_TIME = 30000;
 const CYCLE = SHIFT_TIME * COLORS.length;
 
 const COMBO_WINDOW = 3500;
-const OVERLOAD_DURATION = 4500;
+const OVERLOAD_DURATION = 5000;
 const DUEL_DURATION = 1300;
 const DUEL_ZONE_BASE = 170;
 const DUEL_ZONE_MIN = 70;
@@ -444,9 +486,7 @@ function shadeColor(hex, pct){
 }
 
 const orbSprites = {};
-function orbSprite(color, r){
-  const key = color + '_' + r;
-  if(orbSprites[key]) return orbSprites[key];
+function buildOrbSprite(color, r){
   const pad = 18;
   const c = document.createElement('canvas');
   c.width = c.height = (r+pad)*2;
@@ -456,20 +496,20 @@ function orbSprite(color, r){
   grad.addColorStop(0, shadeColor(color, 0.4));
   grad.addColorStop(0.45, color);
   grad.addColorStop(1, shadeColor(color, -0.6));
-  x.shadowColor = color;
-  x.shadowBlur = 12;
   x.beginPath();
   x.arc(cx, cy, r, 0, Math.PI*2);
   x.fillStyle = grad;
   x.fill();
-  x.shadowBlur = 0;
-  orbSprites[key] = c;
+  orbSprites[color + '_' + r] = c;
   return c;
 }
+function orbSprite(color, r){
+  const key = color + '_' + r;
+  if(orbSprites[key]) return orbSprites[key];
+  return buildOrbSprite(color, r);
+}
 const beadSprites = {};
-function beadSprite(color, radius){
-  const key = color + '_' + radius;
-  if(beadSprites[key]) return beadSprites[key];
+function buildBeadSprite(color, radius){
   const c = document.createElement('canvas');
   const d = radius*2 + 8;
   c.width = c.height = d;
@@ -486,8 +526,27 @@ function beadSprite(color, radius){
   x.lineWidth = 1;
   x.strokeStyle = 'rgba(0,0,0,0.25)';
   x.stroke();
-  beadSprites[key] = c;
+  beadSprites[color + '_' + radius] = c;
   return c;
+}
+function beadSprite(color, radius){
+  const key = color + '_' + radius;
+  if(beadSprites[key]) return beadSprites[key];
+  return buildBeadSprite(color, radius);
+}
+function prewarmSprites(){
+  const beadR = [];
+  for(const t of [0.6,0.7,0.8,0.9,1.3,1.5,1.7,2.0,2.2]){
+    const bodyR = Math.round(11*t*10)/10;
+    const headR = Math.round(13.5*t*10)/10;
+    if(beadR.indexOf(bodyR) < 0) beadR.push(bodyR);
+    if(beadR.indexOf(headR) < 0) beadR.push(headR);
+  }
+  for(const col of COLORS){
+    buildOrbSprite(col, 4); buildOrbSprite(col, 5); buildOrbSprite(col, 6);
+    for(const r of beadR) buildBeadSprite(col, r);
+  }
+  buildOrbSprite('#4db8ff', 7);
 }
 
 function getPulsePeriod(elapsed){
@@ -598,36 +657,45 @@ function findOrbSpot(cx, cy, range){
   return {x,y};
 }
 function spawnOrb(){
-  const isPrism = Math.random() < 0.025;
-  const r = isPrism ? 10 : rand(4,6);
+  const kind = rollOrbKind();
+  const isPrism = kind === 'prism';
+  const r = kind === 'prism' ? 10 : (kind === 'star' ? 8 : (kind === 'magnet' ? 7 : rand(4,6)));
   const spot = findOrbSpot(0,0,0);
   return {
     x: spot.x, y: spot.y,
-    color: isPrism ? 'gold' : pickOrbColor(),
-    r, wobble: rand(0, Math.PI*2), prism: isPrism
+    color: isPrism ? 'gold' : (kind==='star' ? 'gold' : (kind==='magnet' ? '#4db8ff' : pickOrbColor())),
+    r, wobble: rand(0, Math.PI*2), prism: isPrism, kind
   };
 }
 function spawnOrbNear(px, py){
-  const isPrism = Math.random() < 0.025;
-  const r = isPrism ? 10 : rand(4,6);
+  const kind = rollOrbKind();
+  const isPrism = kind === 'prism';
+  const r = kind === 'prism' ? 10 : (kind === 'star' ? 8 : (kind === 'magnet' ? 7 : rand(4,6)));
   const spot = findOrbSpot(px, py, W*0.9);
   return {
     x: spot.x, y: spot.y,
-    color: isPrism ? 'gold' : pickOrbColor(),
-    r, wobble: rand(0, Math.PI*2), prism: isPrism
+    color: isPrism ? 'gold' : (kind==='star' ? 'gold' : (kind==='magnet' ? '#4db8ff' : pickOrbColor())),
+    r, wobble: rand(0, Math.PI*2), prism: isPrism, kind
   };
+}
+function rollOrbKind(){
+  const r = Math.random();
+  if(r < 0.02) return 'prism';
+  if(r < 0.045) return 'star';
+  if(r < 0.07) return 'magnet';
+  return 'orb';
 }
 function rebiasOrbs(newColor){
   // when the color shift happens, repaint a portion of the already-spawned
   // orbs so the field noticeably favors the snake's new color right away
   for(let i=0;i<orbs.length;i++){
     const o = orbs[i];
-    if(o.prism) continue;
+    if(o.prism || o.kind==='star' || o.kind==='magnet') continue;
     o.color = Math.random() < 0.5 ? newColor : COLORS[Math.floor(Math.random()*COLORS.length)];
   }
 }
 
-function explodePrism(x,y){
+function explodePrism(x,y,color){
   const n = Math.floor(rand(6,9));
   for(let i=0;i<n;i++){
     const ang = rand(0,Math.PI*2);
@@ -635,8 +703,8 @@ function explodePrism(x,y){
     orbs.push({
       x: clamp(x+Math.cos(ang)*d, 30, WORLD_W-30),
       y: clamp(y+Math.sin(ang)*d, 30, WORLD_H-30),
-      color: pickOrbColor(),
-      r: rand(4,6), wobble: rand(0,Math.PI*2), prism:false
+      color: color,
+      r: rand(4,6), wobble: rand(0,Math.PI*2), prism:false, kind:'orb'
     });
   }
   addParticles(x,y,'#ffd23f',26);
@@ -644,6 +712,7 @@ function explodePrism(x,y){
 
 function initGame(){
   computeWorldSize();
+  prewarmSprites();
   paused = false;
   document.body.classList.remove('cd-paused');
   pauseOverlay.classList.add('hidden');
@@ -651,22 +720,33 @@ function initGame(){
   player.comboEats = [];
   player.overloadUntil = 0;
   player.duelInvulnUntil = 0;
+  player.magnetUntil = 0;
+  player.multUntil = 0;
   camera.x = player.x; camera.y = player.y;
   bots = [];
+  const botSizes = [15, 25, 40, 60, 90, 140, 220, 350, 600, 1000, 1800, 3000];
+  const shuffledColors = COLORS.slice().sort(function(){ return Math.random()-0.5; });
   for(let i=0;i<BOT_COUNT;i++){
-    bots.push(makeSnake(rand(150,WORLD_W-150), rand(150,WORLD_H-150), CYAN, rand(16,30), false));
+    const col = shuffledColors[i] || COLORS[Math.floor(Math.random()*COLORS.length)];
+    const len = botSizes[i] || botSizes[Math.floor(Math.random()*botSizes.length)];
+    const b = makeSnake(rand(150,WORLD_W-150), rand(150,WORLD_H-150), col, len, false);
+    b.rainbow = Math.random() < 0.35;
+    b.thick = Math.random() < 0.5 ? rand(0.6, 0.9) : rand(1.3, 2.2);
+    b.thick = Math.round(b.thick * 2) / 2;
+    bots.push(b);
   }
   orbs = [];
   for(let i=0;i<ORB_COUNT;i++){
     orbs.push(i < ORB_COUNT*0.5 ? spawnOrbNear(player.x, player.y) : spawnOrb());
   }
   particles = [];
+  popups = [];
   score = 0;
   running = true;
   initialized = true;
   duel = null;
   roundStart = performance.now();
-  document.getElementById('scoreVal').textContent = '0';
+  scoreEl.textContent = '0';
   duelPanel.classList.add('hidden');
   duelDim.classList.add('hidden');
   document.body.classList.add('game-active');
@@ -677,6 +757,11 @@ function addParticles(x,y,color,n){
   for(let i=0;i<n;i++){
     particles.push({ x,y,color, vx: rand(-2,2), vy: rand(-2,2), life: rand(20,40), maxLife: 40 });
   }
+}
+
+let popups = [];
+function addPopup(x,y,text,color){
+  popups.push({ x, y, text, color, life: 60, maxLife: 60, vy: -1.3 });
 }
 
 // ---------- input ----------
@@ -772,22 +857,52 @@ function checkOverloadTrigger(elapsed){
 
 function checkOrbEat(sn, isPlayer, elapsed){
   const overloadActive = isPlayer && elapsed < (player.overloadUntil||0);
+  const multActive = isPlayer && elapsed < (player.multUntil||0);
   const col = sn.color;
   for(let i=orbs.length-1;i>=0;i--){
     const o = orbs[i];
     if(dist2(sn.x,sn.y,o.x,o.y) < (o.r+8)*(o.r+8)){
       if(o.prism){
         orbs.splice(i,1);
-        explodePrism(o.x,o.y);
-        if(isPlayer){ score += 15; document.getElementById('scoreVal').textContent = score; sfxPrism(); }
+        explodePrism(o.x,o.y, sn.color);
+        if(isPlayer){
+          sn.len += GROW_AMT * 2.5;
+          score += 50 * (multActive ? 2 : 1);
+          scoreEl.textContent = score;
+          addPopup(o.x,o.y,'+50 PRISM!','#ffd23f');
+          addParticles(o.x,o.y,'#fff',16);
+          sfxPrism();
+        }
+        break;
+      }
+      if(o.kind === 'star'){
+        orbs.splice(i,1);
+        if(isPlayer){
+          player.multUntil = elapsed + 7000;
+          score += 25;
+          scoreEl.textContent = score;
+          addPopup(o.x,o.y,'DOUBLE SCORE!','#ffd23f');
+          addParticles(o.x,o.y,'#ffd23f',22);
+          sfxStar();
+        }
+        break;
+      }
+      if(o.kind === 'magnet'){
+        orbs.splice(i,1);
+        if(isPlayer){
+          player.magnetUntil = elapsed + 5000;
+          addPopup(o.x,o.y,'MAGNET!','#4db8ff');
+          addParticles(o.x,o.y,'#4db8ff',18);
+          sfxMagnet();
+        }
         break;
       }
       const isMatch = o.color === col;
       if(isMatch || overloadActive){
         sn.len += GROW_AMT;
         if(isPlayer){
-          score += overloadActive ? 20 : 10;
-          document.getElementById('scoreVal').textContent = score;
+          score += (overloadActive ? 20 : 10) * (multActive ? 2 : 1);
+          scoreEl.textContent = score;
           sn.speed = BOOST_SPEED; sn.boostT = 12;
           if(isMatch){
             player.comboEats.push({color:col, time:elapsed});
@@ -799,7 +914,14 @@ function checkOrbEat(sn, isPlayer, elapsed){
         addParticles(o.x,o.y,col,10);
       } else {
         sn.len = Math.max(MIN_LEN, sn.len - SHRINK_AMT);
-        if(isPlayer){ score = Math.max(0,score-4); document.getElementById('scoreVal').textContent = score; sn.flash = 10; sfxMismatch(); }
+        if(isPlayer){
+          score = Math.max(0,score-4); scoreEl.textContent = score; sn.flash = 10; sfxMismatch();
+          if(sn.len <= MIN_LEN + 1){
+            addPopup(player.x, player.y, 'TOO SMALL!', '#ff5555');
+            killPlayer();
+            return;
+          }
+        }
         addParticles(o.x,o.y,o.color,6);
       }
       orbs.splice(i,1);
@@ -810,7 +932,8 @@ function checkOrbEat(sn, isPlayer, elapsed){
 }
 
 function segCollide(px,py,sn,skip){
-  for(let i=skip;i<sn.trail.length;i+=2){
+  const stride = Math.max(2, Math.floor(sn.trail.length / 400));
+  for(let i=skip;i<sn.trail.length;i+=stride){
     const p = sn.trail[i];
     if(dist2(px,py,p.x,p.y) < 8*8) return true;
   }
@@ -822,7 +945,7 @@ function checkSnakeCollisions(elapsed){
   for(const b of bots){
     if(!b.alive) continue;
     if(segCollide(player.x,player.y,b,0)){
-      const botColor = currentPolarity(elapsed, b.pulseOffset);
+      const botColor = b.color;
       if(botColor === player.color || overloadActive){
         b.len = Math.max(MIN_LEN, b.len - (overloadActive?1.2:0.4));
         player.len += overloadActive?0.8:0.3;
@@ -857,7 +980,12 @@ function showGameOver(){
 function respawnBotIfDead(b){
   if(b.len <= MIN_LEN+0.5 && Math.random()<0.02){
     b.x = rand(150,WORLD_W-150); b.y = rand(150,WORLD_H-150);
-    b.len = rand(16,30);
+    const sizes = [15, 25, 40, 60, 90, 140, 220, 350, 600, 1000, 1800, 3000];
+    b.len = sizes[Math.floor(Math.random()*sizes.length)];
+    b.color = COLORS[Math.floor(Math.random()*COLORS.length)];
+    b.rainbow = Math.random() < 0.35;
+    b.thick = Math.random() < 0.5 ? rand(0.6, 0.9) : rand(1.3, 2.2);
+    b.thick = Math.round(b.thick * 2) / 2;
     b.trail = [{x:b.x,y:b.y}];
   }
 }
@@ -914,7 +1042,7 @@ function resolveDuel(success){
     player.y -= Math.sin(player.angle)*28;
     player.duelInvulnUntil = elapsedNow + 1400;
     score += 25;
-    document.getElementById('scoreVal').textContent = score;
+    scoreEl.textContent = score;
     addParticles(player.x, player.y, '#ffffff', 20);
     sfxDuelWin();
     duel = null;
@@ -1011,6 +1139,33 @@ function drawOrb(o,t){
     ctx.fill();
     return;
   }
+  if(o.kind === 'star'){
+    const pulse = 1 + Math.sin(t*0.009 + o.wobble)*0.15;
+    const rad = o.r*pulse;
+    ctx.save();
+    ctx.translate(sx, sy+bob);
+    ctx.shadowColor = '#ffd23f'; ctx.shadowBlur = 14;
+    ctx.font = '20px -apple-system, "Segoe UI Emoji", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('⭐', 0, 0);
+    ctx.shadowBlur = 0;
+    ctx.restore();
+    return;
+  }
+  if(o.kind === 'magnet'){
+    const pulse = 1 + Math.sin(t*0.009 + o.wobble)*0.12;
+    ctx.save();
+    ctx.translate(sx, sy+bob);
+    ctx.shadowColor = '#4db8ff'; ctx.shadowBlur = 12;
+    ctx.font = '18px -apple-system, "Segoe UI Emoji", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('🧲', 0, 0);
+    ctx.shadowBlur = 0;
+    ctx.restore();
+    return;
+  }
   const sp = orbSprite(o.color, o.r);
   ctx.drawImage(sp, sx - sp.width/2, sy + bob - sp.height/2);
 }
@@ -1044,30 +1199,38 @@ function drawPhaseSight(sn){
   ctx.restore();
 }
 
-function drawSnake3D(sn, isPlayer, overrideColor){
+function drawSnake3D(sn, isPlayer, overrideColor, rainbow){
   const pts = sn.trail;
   if(pts.length < 2) return;
-  const col = overrideColor || sn.color;
   const glow = isPlayer ? 16 : 8;
-  const step = 3;
+  const step = Math.max(3, Math.floor(pts.length / 220));
+  const thick = sn.thick || 1;
+  const bodyR = 11 * thick;
+  const headR = 13.5 * thick;
+  let beadIdx = 0;
+  const beadColor = rainbow ? COLORS[beadIdx % COLORS.length] : (overrideColor || sn.color);
   for(let i=pts.length-1;i>=0;i-=step){
     const p = pts[i];
     const {sx,sy} = toScreen(p.x,p.y);
     if(sx < -20 || sx > W+20 || sy < -20 || sy > H+20) continue;
-    drawBead(sx, sy, 11, col);
+    drawBead(sx, sy, bodyR, rainbow ? COLORS[beadIdx % COLORS.length] : beadColor);
+    beadIdx++;
   }
 
   const {sx:hx, sy:hy} = toScreen(sn.x, sn.y);
-  ctx.shadowColor = col; ctx.shadowBlur = glow+6;
-  drawBead(hx, hy, 13.5, col);
+  const headCol = rainbow ? COLORS[(beadIdx+2) % COLORS.length] : beadColor;
+  ctx.shadowColor = headCol; ctx.shadowBlur = glow+6;
+  drawBead(hx, hy, headR, headCol);
   ctx.shadowBlur = 0;
 
   const a1 = sn.angle - 0.55, a2 = sn.angle + 0.55;
-  const eyePts = [[hx+Math.cos(a1)*8.2, hy+Math.sin(a1)*8.2],[hx+Math.cos(a2)*8.2, hy+Math.sin(a2)*8.2]];
+  const eyeR = 4.1 * thick, pupilR = 1.9 * thick;
+  const eyeOff = 8.2 * thick;
+  const eyePts = [[hx+Math.cos(a1)*eyeOff, hy+Math.sin(a1)*eyeOff],[hx+Math.cos(a2)*eyeOff, hy+Math.sin(a2)*eyeOff]];
   for(const [ex,ey] of eyePts){
-    ctx.beginPath(); ctx.arc(ex,ey,4.1,0,Math.PI*2); ctx.fillStyle = '#fff'; ctx.fill();
+    ctx.beginPath(); ctx.arc(ex,ey,eyeR,0,Math.PI*2); ctx.fillStyle = '#fff'; ctx.fill();
     ctx.beginPath();
-    ctx.arc(ex+Math.cos(sn.angle)*1.4, ey+Math.sin(sn.angle)*1.4, 1.9, 0, Math.PI*2);
+    ctx.arc(ex+Math.cos(sn.angle)*eyeR*0.34, ey+Math.sin(sn.angle)*eyeR*0.34, pupilR, 0, Math.PI*2);
     ctx.fillStyle = '#111'; ctx.fill();
   }
 
@@ -1103,6 +1266,24 @@ function drawParticles(){
     ctx.fill();
     ctx.globalAlpha = 1;
   }
+  for(let i=popups.length-1;i>=0;i--){
+    const p = popups[i];
+    p.life--;
+    p.y += p.vy;
+    if(p.life<=0){ popups.splice(i,1); continue; }
+    const {sx,sy} = toScreen(p.x,p.y);
+    const alpha = Math.min(1, p.life/30);
+    ctx.globalAlpha = alpha;
+    ctx.font = '800 15px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+    ctx.strokeText(p.text, sx, sy);
+    ctx.fillStyle = p.color;
+    ctx.fillText(p.text, sx, sy);
+    ctx.globalAlpha = 1;
+  }
 }
 
 function drawMinimap(){
@@ -1116,7 +1297,7 @@ function drawMinimap(){
   for(const o of orbs){
     const dx=o.x-px, dy=o.y-py;
     if(dx*dx+dy*dy > range*range) continue;
-    ctx.fillStyle = o.prism ? '#ffd23f' : o.color;
+    ctx.fillStyle = o.prism ? '#ffd23f' : (o.kind==='star' ? '#ffd23f' : (o.kind==='magnet' ? '#4db8ff' : o.color));
     ctx.fillRect(cx+dx*scale-1, cy+dy*scale-1, 2, 2);
   }
   for(const b of bots){
@@ -1148,9 +1329,27 @@ function updatePolarityHUD(elapsed){
   polLabel.style.color = warning ? '#fff' : 'var(--text)';
   if(col !== prevPolarity){ sfxShift(); prevPolarity = col; rebiasOrbs(col); }
 }
-function updateOverloadBanner(elapsed){
-  if(elapsed < (player.overloadUntil||0)) overloadBanner.classList.add('show');
-  else overloadBanner.classList.remove('show');
+function updateBanner(elapsed){
+  const el = overloadBanner;
+  const now = elapsed;
+  if(now < (player.overloadUntil||0)){
+    el.textContent = '⚡ OVERLOAD MODE';
+    el.style.background = 'linear-gradient(90deg,#ffd23f,#ff9d00)';
+    el.style.boxShadow = '0 0 26px rgba(255,210,63,0.65)';
+    el.classList.add('show');
+  } else if(now < (player.multUntil||0)){
+    el.textContent = '★ DOUBLE SCORE';
+    el.style.background = 'linear-gradient(90deg,#ffe27a,#ff6a00)';
+    el.style.boxShadow = '0 0 26px rgba(255,140,0,0.65)';
+    el.classList.add('show');
+  } else if(now < (player.magnetUntil||0)){
+    el.textContent = '🧲 MAGNET';
+    el.style.background = 'linear-gradient(90deg,#4db8ff,#2a6bff)';
+    el.style.boxShadow = '0 0 26px rgba(77,184,255,0.65)';
+    el.classList.add('show');
+  } else {
+    el.classList.remove('show');
+  }
 }
 
 // ---------- main loop ----------
@@ -1168,7 +1367,7 @@ function loop(t){
       const elapsed = t - roundStart;
       player.color = currentPolarity(elapsed, 0);
       updatePolarityHUD(elapsed);
-      updateOverloadBanner(elapsed);
+      updateBanner(elapsed);
 
       if(keys.ArrowLeft || keys.KeyA || keys.ArrowRight || keys.KeyD ||
          keys.ArrowUp || keys.KeyW || keys.ArrowDown || keys.KeyS){
@@ -1191,8 +1390,20 @@ function loop(t){
       if(wallDeath(player)) killPlayer();
       checkOrbEat(player, true, elapsed);
 
+      if(elapsed < (player.magnetUntil||0)){
+        for(let i=0;i<orbs.length;i++){
+          const o = orbs[i];
+          if(o.color !== player.color) continue;
+          const d2 = dist2(player.x,player.y,o.x,o.y);
+          if(d2 < 150*150){
+            const d = Math.sqrt(d2)||1;
+            o.x += (player.x-o.x)/d * 4.2 * frameDt;
+            o.y += (player.y-o.y)/d * 4.2 * frameDt;
+          }
+        }
+      }
+
       for(const b of bots){
-        b.color = currentPolarity(elapsed, b.pulseOffset);
         updateAI(b);
         checkOrbEat(b, false, elapsed);
         respawnBotIfDead(b);
@@ -1206,12 +1417,12 @@ function loop(t){
   for(const o of orbs) drawOrb(o,t);
   for(const b of bots){
     if(running) drawPhaseSight(b);
-    drawSnake3D(b, false, null);
+    drawSnake3D(b, false, null, !!b.rainbow);
   }
   if(player && player.alive){
     const elapsedNow = t - roundStart;
     const overloadActive = running && !duel && elapsedNow < (player.overloadUntil||0);
-    drawSnake3D(player, true, overloadActive ? '#ffd23f' : null);
+    drawSnake3D(player, true, overloadActive ? '#ffd23f' : null, overloadActive);
   }
   drawParticles();
   if(initialized) drawMinimap();
@@ -1230,11 +1441,13 @@ const reviveBtn = document.getElementById('reviveBtn');
 const overTag = document.getElementById('overTag');
 const bigScore = document.getElementById('bigScore');
 const statLine = document.getElementById('statLine');
+const scoreEl = document.getElementById('scoreVal');
 
 let prevPolarity = CYAN;
 
 function beginRun(){
   initAudio();
+  showInitialAd();
   menuScreen.classList.add('hidden');
   overScreen.classList.add('hidden');
   howToPlayScreen.classList.add('hidden');
@@ -1270,16 +1483,28 @@ startBtn.addEventListener('click', beginRun);
 retryBtn.addEventListener('click', beginRun);
 reviveBtn.addEventListener('click', function(){
   initAudio();
-  showRewardedAd(function(){
+  showRewardedAd('revive-reward', function(){
     overScreen.classList.add('hidden');
     player.alive = true; player.color = CYAN; player.len = START_LEN;
     player.x = WORLD_W/2; player.y = WORLD_H/2;
     player.trail = [{x:player.x, y:player.y}];
     player.angle = rand(0, Math.PI*2);
     player.comboEats = []; player.overloadUntil = 0; player.duelInvulnUntil = 0;
+    player.magnetUntil = 0; player.multUntil = 0;
     running = true; duel = null;
     roundStart = performance.now();
     document.body.classList.add('game-active');
+  });
+});
+document.getElementById('doubleBtn').addEventListener('click', function(){
+  if(score <= 0) return;
+  showRewardedAd('double-score-reward', function(){
+    score = score * 2;
+    if(score > best){ best = score; }
+    bigScore.textContent = score;
+    statLine.textContent = 'Best: ' + best;
+    sdkScoreVal(score);
+    document.getElementById('doubleBtn').style.display = 'none';
   });
 });
 document.getElementById('resumeBtn').addEventListener('click', resumeGame);
