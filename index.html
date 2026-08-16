@@ -205,8 +205,8 @@
     #lifePermBtn{width:56px;height:64px;bottom:72px;left:10px;}
     #lifePermBtn .lifeLabel{font-size:7px;}
     #lifePermBtn .lifeEmoji{font-size:22px;}
-    #lifeAdBanner{bottom:148px;font-size:11px;padding:6px 16px;}
-    #overloadBanner{bottom:148px;}
+    #lifeAdBanner{bottom:140px;font-size:11px;padding:6px 16px;}
+    #overloadBanner{bottom:200px;}
   }
 </style>
 </head>
@@ -1712,9 +1712,9 @@ function drawParticles(){
 }
 
 function drawMinimap(){
-  const sz = W < 600 ? 52 : 68;
-  const mx = W - sz - 8;
-  const my = H - sz - 8;
+  const sz = W < 600 ? 64 : 80;
+  const mx = W - sz - 10;
+  const my = H - sz - 72;
   const scaleX = sz / WORLD_W;
   const scaleY = sz / WORLD_H;
   ctx.save();
