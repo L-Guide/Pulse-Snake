@@ -130,7 +130,30 @@
   body.game-active #pauseBtn{display:block;}
   #pauseBlocker{display:none;position:absolute;inset:0;background:rgba(0,0,0,0.6);z-index:8;}
   body.cd-paused #pauseBlocker{display:block;}
+  body.plat-paused #platformPauseOverlay{display:flex;}
   #pauseOverlay{z-index:9 !important;}
+  #platformPauseOverlay{display:none;position:fixed;inset:0;z-index:99999;
+    background:radial-gradient(ellipse at center,rgba(10,14,26,0.97) 0%,rgba(4,6,12,0.99) 100%);
+    backdrop-filter:blur(12px);align-items:center;justify-content:center;flex-direction:column;
+    pointer-events:auto;touch-action:none;}
+  .plat-pause-icon{font-size:clamp(40px,10vw,64px);margin-bottom:16px;
+    animation:platPulse 2s ease-in-out infinite;filter:drop-shadow(0 0 25px rgba(0,234,255,0.6));}
+  @keyframes platPulse{0%,100%{transform:scale(1);opacity:0.9}50%{transform:scale(1.08);opacity:1}}
+  .plat-pause-text{font-size:clamp(28px,8vw,48px);font-weight:900;letter-spacing:6px;
+    background:linear-gradient(135deg,#00eaff,#ff2fd0);background-size:200% 200%;
+    -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+    animation:platTextShift 3s ease infinite;
+    filter:drop-shadow(0 0 20px rgba(0,234,255,0.5)) drop-shadow(0 0 40px rgba(255,47,208,0.3));
+    text-align:center;}
+  @keyframes platTextShift{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
+  .plat-pause-sub{font-size:clamp(11px,3vw,14px);color:rgba(255,255,255,0.3);margin-top:12px;
+    letter-spacing:3px;text-transform:uppercase;}
+  .plat-pause-dots{display:flex;gap:8px;margin-top:24px;}
+  .plat-pause-dots span{width:8px;height:8px;border-radius:50%;background:#00eaff;
+    animation:platDot 1.4s ease-in-out infinite;}
+  .plat-pause-dots span:nth-child(2){animation-delay:0.2s;}
+  .plat-pause-dots span:nth-child(3){animation-delay:0.4s;}
+  @keyframes platDot{0%,80%,100%{opacity:0.2;transform:scale(0.8)}40%{opacity:1;transform:scale(1.2)}}
 
   .howToPlayContent{background:var(--glass);backdrop-filter:blur(12px);
     border:1px solid rgba(255,255,255,0.12);border-radius:18px;padding:24px;
@@ -169,7 +192,7 @@
     #polarityLabel{font-size:8px;}
 
     #pauseBtn{
-      top:64px;right:8px;
+      top:74px;right:8px;
       padding:5px 12px;font-size:12px;border-radius:8px;
     }
 
@@ -200,6 +223,13 @@
   <div id="pauseBtn">| |</div>
   <div id="pauseBlocker"></div>
 
+  <div id="platformPauseOverlay">
+    <div class="plat-pause-icon">⏸</div>
+    <div class="plat-pause-text">PAUSED</div>
+    <div class="plat-pause-sub">Game is paused</div>
+    <div class="plat-pause-dots"><span></span><span></span><span></span></div>
+  </div>
+
   <div id="duelDim" class="hidden"></div>
   <div class="overlay hidden" id="duelPanel" style="display:flex;">
     <div id="duelTitle">⚠ INCOMING COLLISION!</div>
@@ -218,6 +248,7 @@
     <div class="sub" style="text-align:center;max-width:280px;margin-bottom:20px;">
       Color-shift survival. Grow your snake, dodge enemies, survive the pulse.
     </div>
+    <div id="menuBest" style="font-size:13px;opacity:0.55;margin-bottom:4px;letter-spacing:1px;">BEST: 0</div>
     <button class="btn" id="startBtn">TAP TO START</button>
     <button class="btn" id="bgBtn">CHOOSE BACKGROUND</button>
     <button class="btn" id="howToPlayBtn">HOW TO PLAY</button>
@@ -266,7 +297,6 @@
     <div id="bigScore">0</div>
     <div id="statLine">Best: 0</div>
     <button class="btn" id="retryBtn" style="margin-top:22px;">RETRY</button>
-    <button class="btn" id="doubleBtn" style="margin-top:8px;background:linear-gradient(90deg,rgba(255,140,0,0.2),rgba(255,210,63,0.2));border-color:rgba(255,210,63,0.3);">DOUBLE SCORE (AD)</button>
     <button class="btn" id="reviveBtn" style="margin-top:8px;background:linear-gradient(90deg,rgba(255,210,63,0.2),rgba(255,157,0,0.2));border-color:rgba(255,210,63,0.3);">REVIVE (AD)</button>
   </div>
 
@@ -289,9 +319,11 @@ function sdkInit(){
         try { ytgame.game.gameReady(); } catch(e){}
         try {
           var en = ytgame.system.isAudioEnabled();
-          if(bgmGain) bgmGain.gain.value = en ? bgmVolume : 0;
+          if(typeof en === 'boolean') audioOn = en;
         } catch(e){}
+        setAudioEnabled(audioOn);
         loadBgFromSDK();
+        sdkLoad('best', function(v){ if(typeof v === 'number' && v > 0){ best = v; updateBestDisplay(); } });
       };
       if(typeof ytgame.ready === 'function'){
         ytgame.ready(boot);
@@ -301,18 +333,40 @@ function sdkInit(){
       ytgame.system.onPause(function(){ if(!paused){ paused = true; platformPause(); }});
       ytgame.system.onResume(function(){ if(paused){ paused = false; platformResume(); }});
       ytgame.system.onAudioEnabledChange(function(en){
-        if(bgmGain) bgmGain.gain.value = en ? bgmVolume : 0;
+        audioOn = !!en;
+        setAudioEnabled(audioOn);
+        if(audioOn && running && !paused && !bgmRunning) startBGM();
       });
     }
   } catch(e){}
 }
+const SAVE_KEY = 'pulseSnakeSave';
+function sdkSaveData(obj){
+  if(!obj) return;
+  try{ localStorage.setItem(SAVE_KEY, JSON.stringify(obj)); }catch(e){}
+  try{ if(sdkReady && typeof ytgame !== 'undefined') ytgame.game.saveData(JSON.stringify(obj)); }catch(e){}
+}
 function sdkSave(key, val){
-  try { if(sdkReady && typeof ytgame !== 'undefined') ytgame.game.saveData(JSON.stringify({[key]: val})); } catch(e){}
+  var obj = {};
+  try{ obj = JSON.parse(localStorage.getItem(SAVE_KEY)) || {}; }catch(e){}
+  obj[key] = val;
+  sdkSaveData(obj);
 }
 function sdkLoad(key, cb){
-  try { if(sdkReady && typeof ytgame !== 'undefined') ytgame.game.loadData().then(function(d){
-    try { var o = JSON.parse(d); cb(o[key]); } catch(e){ cb(null); }
-  }).catch(function(){ cb(null); }); } catch(e){ cb(null); }
+  var apply = function(o){ try{ cb(o ? o[key] : null); }catch(e){ cb(null); } };
+  var local = null;
+  try{ local = JSON.parse(localStorage.getItem(SAVE_KEY)); }catch(e){}
+  if(local && local[key] !== undefined){ apply(local); return; }
+  try {
+    if(sdkReady && typeof ytgame !== 'undefined' && ytgame.game && ytgame.game.loadData){
+      ytgame.game.loadData().then(function(d){
+        var o = null;
+        try{ o = JSON.parse(d); }catch(e){}
+        if(o) sdkSaveData(o);
+        apply(o);
+      }).catch(function(){ apply(null); });
+    } else { apply(null); }
+  } catch(e){ apply(null); }
 }
 function sdkScoreVal(v){
   try { if(typeof ytgame !== 'undefined') ytgame.engagement.sendScore({value: Math.floor(v)}); } catch(e){}
@@ -355,7 +409,21 @@ function showRewardedAd(rewardId, onSuccess){
 // ---------- Audio ----------
 let audioCtx = null, bgmGain = null;
 const bgmVolume = 0.28;
+let audioOn = true;
 let bgmOscs = [], bgmRunning = false, musicInterval = null;
+
+function setAudioEnabled(en){
+  try{
+    if(bgmGain) bgmGain.gain.value = en ? bgmVolume : 0;
+  }catch(e){}
+  if(!en) stopBGM();
+}
+function updateBestDisplay(){
+  const st = document.getElementById('statLine');
+  if(st) st.textContent = 'Best: ' + best;
+  const mb = document.getElementById('menuBest');
+  if(mb) mb.textContent = 'BEST: ' + best;
+}
 
 function initAudio(){
   if(!audioCtx){
@@ -370,7 +438,7 @@ function initAudio(){
   }
 }
 function playTone(freq, dur, type, vol, det){
-  if(!audioCtx) return;
+  if(!audioCtx || !audioOn) return;
   var o = audioCtx.createOscillator(), g = audioCtx.createGain();
   o.type = type || 'sine'; o.frequency.value = freq;
   if(det) o.detune.value = det;
@@ -402,7 +470,7 @@ function checkMilestone(){
 function sfxShift(){ playTone(1000,0.08,'sine',0.06); }
 
 function startBGM(){
-  if(bgmRunning || !audioCtx) return;
+  if(bgmRunning || !audioCtx || !audioOn) return;
   bgmRunning = true;
 
   var master = audioCtx.createGain();
@@ -470,11 +538,15 @@ function stopBGM(){
 
 function platformPause(){
   document.body.classList.add('cd-paused');
+  document.body.classList.add('plat-paused');
+  stopBGM();
   if(audioCtx) try{ audioCtx.suspend(); }catch(e){}
 }
 function platformResume(){
   document.body.classList.remove('cd-paused');
+  document.body.classList.remove('plat-paused');
   if(audioCtx) try{ audioCtx.resume(); }catch(e){}
+  if(running && !paused && audioOn) startBGM();
 }
 
 const canvas = document.getElementById('game');
@@ -1210,12 +1282,13 @@ function killPlayer(){
   sfxDeath();
   if(score > best) best = score;
   sdkScoreVal(score);
+  sdkSave('best', best);
   setTimeout(showGameOver, 300);
 }
 
 function showGameOver(){
   bigScore.textContent = score;
-  statLine.textContent = 'Best: ' + best;
+  updateBestDisplay();
   overScreen.classList.remove('hidden');
   document.body.classList.remove('game-active');
   initialAdShown = false;
@@ -2116,6 +2189,7 @@ function pauseGame(){
   paused = true;
   document.body.classList.add('cd-paused');
   pauseOverlay.classList.remove('hidden');
+  stopBGM();
   if(audioCtx) try{ audioCtx.suspend(); }catch(e){}
 }
 function resumeGame(){
@@ -2123,14 +2197,17 @@ function resumeGame(){
   document.body.classList.remove('cd-paused');
   pauseOverlay.classList.add('hidden');
   if(audioCtx) try{ audioCtx.resume(); }catch(e){}
+  if(audioOn) startBGM();
 }
 function quitToMenu(){
   paused = false; running = false; initialized = false;
   document.body.classList.remove('cd-paused');
+  document.body.classList.remove('plat-paused');
   document.body.classList.remove('game-active');
   pauseOverlay.classList.add('hidden');
   menuScreen.classList.remove('hidden');
   overScreen.classList.add('hidden');
+  updateBestDisplay();
 }
 
 startBtn.addEventListener('click', beginRun);
@@ -2146,21 +2223,11 @@ reviveBtn.addEventListener('click', function(){
     player.comboEats = []; player.overloadUntil = 0; player.duelInvulnUntil = 0;
     player.magnetUntil = 0; player.multUntil = 0; player.shieldUntil = 0;
     player.lives = START_LIVES;
+    player.spawnProtectUntil = performance.now() + 3500;
     updateLivesHUD();
     running = true; duel = null;
     roundStart = performance.now();
     document.body.classList.add('game-active');
-  });
-});
-document.getElementById('doubleBtn').addEventListener('click', function(){
-  if(score <= 0) return;
-  showRewardedAd('double-score-reward', function(){
-    score = score * 2;
-    if(score > best){ best = score; }
-    bigScore.textContent = score;
-    statLine.textContent = 'Best: ' + best;
-    sdkScoreVal(score);
-    document.getElementById('doubleBtn').style.display = 'none';
   });
 });
 document.getElementById('resumeBtn').addEventListener('click', resumeGame);
