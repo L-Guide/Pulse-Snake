@@ -1284,7 +1284,8 @@ function killPlayer(){
     x: player.x,
     y: player.y,
     angle: player.angle,
-    lives: player.lives != null ? player.lives : START_LIVES
+    lives: player.lives != null ? player.lives : START_LIVES,
+    polarity: (performance.now() - roundStart) % CYCLE
   };
   screenShake.x = rand(-16, 16);
   screenShake.y = rand(-16, 16);
@@ -2226,20 +2227,31 @@ reviveBtn.addEventListener('click', function(){
   showRewardedAd('revive-reward', function(){
     overScreen.classList.add('hidden');
     player.alive = true;
+    let startAngle;
     if(deathState){
       player.len = Math.max(deathState.len, START_LEN);
       player.thick = deathState.thick || 1;
       player.x = deathState.x; player.y = deathState.y;
       player.angle = deathState.angle;
       player.lives = Math.max(1, deathState.lives);
+      startAngle = deathState.angle;
     } else {
       player.len = START_LEN; player.thick = 1;
       player.x = WORLD_W/2; player.y = WORLD_H/2;
       player.angle = rand(0, Math.PI*2);
       player.lives = START_LIVES;
+      startAngle = player.angle;
     }
-    player.color = CYAN;
-    player.trail = [{x:player.x, y:player.y}];
+    const bodyR = 11 * (player.thick || 1);
+    const stepDist = bodyR * 0.52;
+    const maxBeads = Math.max(12, Math.floor(player.len * 1.6));
+    player.trail = [];
+    for(let bi=0; bi < maxBeads; bi++){
+      player.trail.push({
+        x: player.x - Math.cos(startAngle) * bi * stepDist,
+        y: player.y - Math.sin(startAngle) * bi * stepDist
+      });
+    }
     player.comboEats = []; player.overloadUntil = 0; player.duelInvulnUntil = 0;
     player.magnetUntil = 0; player.multUntil = 0; player.shieldUntil = 0;
     player.spawnProtectUntil = performance.now() + 3500;
@@ -2247,6 +2259,7 @@ reviveBtn.addEventListener('click', function(){
     updateLivesHUD();
     running = true; duel = null;
     roundStart = performance.now();
+    if(deathState && deathState.polarity != null) roundStart -= deathState.polarity;
     document.body.classList.add('game-active');
   });
 });
