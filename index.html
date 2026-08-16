@@ -80,23 +80,6 @@
     background:linear-gradient(145deg,rgba(255,68,102,0.5),rgba(200,40,80,0.2),rgba(255,100,130,0.5));
     z-index:-1;}
 
-  #duelDim{position:absolute;inset:0;background:rgba(0,0,0,0.4);z-index:4;transition:opacity .15s;}
-  #duelDim.hidden{opacity:0;pointer-events:none;}
-  #duelPanel{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
-    width:320px;padding:22px 26px;background:var(--glass);backdrop-filter:blur(12px);
-    border:1px solid rgba(255,255,255,0.18);border-radius:18px;text-align:center;
-    color:var(--text);z-index:5;transition:opacity .15s;}
-  #duelPanel.hidden{opacity:0;pointer-events:none;}
-  #duelTitle{font-weight:800;letter-spacing:2px;margin-bottom:14px;font-size:15px;color:#fff;
-    text-shadow:0 0 12px rgba(255,80,80,0.7);}
-  #duelBar{position:relative;height:16px;border-radius:8px;background:rgba(255,255,255,0.08);
-    overflow:hidden;margin-bottom:10px;border:1px solid rgba(255,255,255,0.1);}
-  #duelZone{position:absolute;top:0;bottom:0;background:rgba(0,234,255,0.45);
-    box-shadow:0 0 12px rgba(0,234,255,0.5) inset;}
-  #duelMarker{position:absolute;top:-4px;width:4px;height:24px;background:#fff;
-    box-shadow:0 0 10px #fff;border-radius:2px;}
-  #duelHint{font-size:11px;opacity:0.65;letter-spacing:0.5px;}
-
   .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     flex-direction:column;background:radial-gradient(ellipse at center, rgba(10,14,26,0.75) 0%, rgba(6,8,15,0.88) 100%);
     text-align:center;color:var(--text);transition:opacity .4s ease;z-index:6;}
@@ -198,10 +181,6 @@
 
     .tinyhint{display:none !important;}
 
-    #duelPanel{width:90vw;padding:16px 14px;}
-    #duelTitle{font-size:13px;margin-bottom:10px;}
-    #duelHint{font-size:10px;}
-
     #lifePermBtn{width:56px;height:64px;bottom:72px;left:10px;}
     #lifePermBtn .lifeLabel{font-size:7px;}
     #lifePermBtn .lifeEmoji{font-size:22px;}
@@ -236,12 +215,6 @@
     <div class="plat-pause-dots"><span></span><span></span><span></span></div>
   </div>
 
-  <div id="duelDim" class="hidden"></div>
-  <div class="overlay hidden" id="duelPanel" style="display:flex;">
-    <div id="duelTitle">⚠ INCOMING COLLISION!</div>
-    <div id="duelBar"><div id="duelZone"></div><div id="duelMarker"></div></div>
-    <div id="duelHint">TAP / CLICK / SPACE inside the bright zone</div>
-  </div>
 
   <div class="overlay hidden" id="pauseOverlay">
     <div class="title" style="font-size:28px;">PAUSED</div>
@@ -265,16 +238,16 @@
       <h3>HOW TO PLAY</h3>
       <p>Colors shift through <b>10 different hues</b>, changing <b>every 30 seconds</b>.</p>
       <p>Eat <b>matching orbs</b> to grow. <span class="g">Mismatched enemies</span> shrink you.</p>
-      <p><span class="g">Lives:</span> you start with 5 ❤️. Every wrong-colored orb costs one life — lose them all and it's game over.</p>
+      <p><span class="g">Lives:</span> you start with 3 ❤️. Every wrong-colored orb costs one life — lose them all and it's game over. Tap the ❤️ button to watch an ad and earn +1 life!</p>
       <p><span class="g">Danger:</span> shrink to minimum size and your snake dies!</p>
-      <p><span class="g">Overload:</span> eat two different colors within a few seconds for temporary golden invincibility (5s).</p>
-      <p><span class="g">Duel:</span> collide with a mismatched enemy and you get one timing-based chance to survive instead of instant death.</p>
+      <p><span class="g">Overload:</span> eat two different colors within a few seconds for temporary golden invincibility (10s).</p>
+      <p><span class="g">Shield 🛡️:</span> blocks one hit from a mismatched enemy (6s).</p>
       <p><span class="g">Prism orbs</span> explode into a burst of orbs when eaten and give a big growth + score boost.</p>
       <p><span class="g">Star ★</span> gives <span class="g">double score</span> for 7s. <span class="g">Magnet 🧲</span> pulls nearby orbs to you for 5s.</p>
       <p><b>Controls:</b><br>
       Mouse / Touch: steer toward cursor<br>
       Arrow Keys / WASD: steer<br>
-      Space: boost / trigger duel<br>
+      Space: boost<br>
       Escape: pause</p>
       <p>Your snake <b>moves in a straight line</b> when idle. Hitting your own body is <b>safe</b>!</p>
     </div>
@@ -383,6 +356,8 @@ function resumeAudioCtx(){
 function showInterlude(){
   if(_adShowing) return;
   _adShowing = true;
+  stopBGM();
+  if(audioCtx) try{ audioCtx.suspend(); }catch(e){}
   try {
     if(typeof ytgame !== 'undefined' && ytgame.ads && typeof ytgame.ads.requestInterstitialAd === 'function'){
       ytgame.ads.requestInterstitialAd().then(function(){ _adShowing = false; resumeAudioCtx(); }).catch(function(){ _adShowing = false; });
@@ -399,6 +374,8 @@ function showInitialAd(){
 function showRewardedAd(rewardId, onSuccess){
   if(_adShowing) return;
   _adShowing = true;
+  stopBGM();
+  if(audioCtx) try{ audioCtx.suspend(); }catch(e){}
   try {
     if(typeof ytgame !== 'undefined' && ytgame.ads && typeof ytgame.ads.requestRewardedAd === 'function'){
       ytgame.ads.requestRewardedAd(rewardId).then(function(earned){
@@ -459,9 +436,6 @@ function sfxPrism(){ playTone(800,0.15,'sine',0.12); playTone(1200,0.12,'sine',0
 function sfxStar(){ playTone(700,0.12,'sine',0.14); playTone(1000,0.12,'sine',0.12); playTone(1300,0.18,'sine',0.1); }
 function sfxMagnet(){ playTone(300,0.2,'triangle',0.12); playTone(450,0.2,'triangle',0.1); }
 function sfxOverload(){ playTone(400,0.3,'sine',0.15); playTone(600,0.25,'sine',0.12); playTone(800,0.2,'sine',0.1); }
-function sfxDuelStart(){ playTone(500,0.15,'square',0.1); playTone(700,0.12,'square',0.08); }
-function sfxDuelWin(){ playTone(600,0.1,'sine',0.12); playTone(900,0.15,'sine',0.1); playTone(1200,0.2,'sine',0.08); }
-function sfxDuelLose(){ playTone(400,0.15,'sawtooth',0.1); playTone(200,0.3,'sawtooth',0.08); }
 function sfxShield(){ playTone(800,0.15,'sine',0.12); playTone(1200,0.12,'sine',0.1); playTone(600,0.18,'sine',0.08); }
 function sfxDeath(){ playTone(400,0.2,'sine',0.15); playTone(300,0.3,'sine',0.12); playTone(200,0.5,'sine',0.1); }
 function checkMilestone(){
@@ -596,9 +570,6 @@ const CYCLE = SHIFT_TIME * COLORS.length;
 
 const COMBO_WINDOW = 3500;
 const OVERLOAD_DURATION = 10000;
-const DUEL_DURATION = 1300;
-const DUEL_ZONE_BASE = 170;
-const DUEL_ZONE_MIN = 70;
 
 let best = 0;
 let bgType = 'hex';
@@ -830,7 +801,7 @@ function makeSnake(x,y,color,len,isPlayer){
   };
 }
 
-let player, bots, orbs, particles, running, initialized, score, mx, my, pointerActive, roundStart, duel;
+let player, bots, orbs, particles, running, initialized, score, mx, my, pointerActive, roundStart;
 let deathState = null;
 let boostHeld = false, boostReady = true;
 
@@ -926,7 +897,6 @@ function initGame(){
   player = makeSnake(WORLD_W/2, WORLD_H/2, CYAN, START_LEN, true);
   player.comboEats = [];
   player.overloadUntil = 0;
-  player.duelInvulnUntil = 0;
   player.magnetUntil = 0;
   player.multUntil = 0;
   player.shieldUntil = 0;
@@ -961,11 +931,8 @@ function initGame(){
   screenShake = {x: 0, y: 0};
   running = true;
   initialized = true;
-  duel = null;
   roundStart = performance.now();
   scoreEl.textContent = '0';
-  duelPanel.classList.add('hidden');
-  duelDim.classList.add('hidden');
   document.body.classList.add('game-active');
   prevPolarity = CYAN;
 }
@@ -1004,17 +971,15 @@ function setPointer(clientX, clientY){
 canvas.addEventListener('mousemove', e=> setPointer(e.clientX, e.clientY));
 canvas.addEventListener('touchstart', e=>{
   e.preventDefault();
-  attemptDuel();
   pointerHeld = true;
   const t=e.touches[0]; setPointer(t.clientX,t.clientY);
 }, {passive:false});
 canvas.addEventListener('touchmove', e=>{ e.preventDefault(); const t=e.touches[0]; setPointer(t.clientX,t.clientY); }, {passive:false});
 canvas.addEventListener('touchend', e=>{ e.preventDefault(); pointerHeld = false; }, {passive:false});
 canvas.addEventListener('touchcancel', e=>{ e.preventDefault(); pointerHeld = false; }, {passive:false});
-canvas.addEventListener('click', ()=> attemptDuel());
 window.addEventListener('keydown', e=>{
   keys[e.code] = true;
-  if(e.code === 'Space'){ e.preventDefault(); if(running && !duel) boostHeld = true; else attemptDuel(); }
+  if(e.code === 'Space'){ e.preventDefault(); if(running) boostHeld = true; }
   if(e.code === 'Escape') togglePause();
 });
 window.addEventListener('keyup', e=>{ keys[e.code] = false; if(e.code === 'Space') boostHeld = false; });
@@ -1205,9 +1170,24 @@ function checkOrbEat(sn, isPlayer, elapsed){
 }
 
 function segCollide(px,py,sn,skip){
-  const stride = Math.max(3, Math.floor(sn.trail.length / 250));
-  for(let i=skip;i<sn.trail.length;i+=stride){
-    const p = sn.trail[i];
+  const trail = sn.trail;
+  if(trail.length <= skip) return false;
+  // Only the arc-length that drawSnake3D actually renders should be able
+  // to hurt the player — the raw trail array is kept much longer than the
+  // visible body for length bookkeeping, so without this cap the tail had
+  // an invisible "ghost" stretch past where the snake visibly ends.
+  const thick = sn.thick || 1;
+  const bodyR = 11 * thick;
+  const stepDist = bodyR * 0.52;
+  const maxBeads = Math.max(12, Math.floor(sn.len * 1.6));
+  const visibleLen = maxBeads * stepDist;
+  const stride = Math.max(3, Math.floor(trail.length / 250));
+  let acc = 0, prevX = trail[skip].x, prevY = trail[skip].y;
+  for(let i=skip;i<trail.length;i+=stride){
+    const p = trail[i];
+    acc += Math.hypot(p.x - prevX, p.y - prevY);
+    prevX = p.x; prevY = p.y;
+    if(acc > visibleLen) break;
     if(dist2(px,py,p.x,p.y) < 10*10) return true;
   }
   return false;
@@ -1318,73 +1298,6 @@ function respawnBotIfDead(b){
     b.color = COLORS[Math.floor(Math.random()*COLORS.length)];
     b.thick = rand(0.85, 1.25);
     b.trail = [{x:b.x,y:b.y}];
-  }
-}
-
-// ---------- duel ----------
-const duelDim = document.getElementById('duelDim');
-const duelPanel = document.getElementById('duelPanel');
-const duelZone = document.getElementById('duelZone');
-const duelMarker = document.getElementById('duelMarker');
-
-function startDuel(bot){
-  const zoneWidthMs = clamp(DUEL_ZONE_BASE - score*0.25, DUEL_ZONE_MIN, DUEL_ZONE_BASE);
-  const zoneStartFrac = rand(0.12, 0.62);
-  duel = {
-    bot,
-    rawStart: performance.now(),
-    duration: DUEL_DURATION,
-    zoneStart: zoneStartFrac,
-    zoneWidthFrac: zoneWidthMs / DUEL_DURATION,
-    resolved: false
-  };
-  duelPanel.classList.remove('hidden');
-  duelDim.classList.remove('hidden');
-  sfxDuelStart();
-}
-
-function updateDuelFrame(){
-  const now = performance.now();
-  const prog = clamp((now-duel.rawStart)/duel.duration, 0, 1);
-  duelMarker.style.left = (prog*100)+'%';
-  duelZone.style.left = (duel.zoneStart*100)+'%';
-  duelZone.style.width = (duel.zoneWidthFrac*100)+'%';
-  if(prog >= 1 && !duel.resolved){
-    duel.resolved = true;
-    resolveDuel(false);
-  }
-}
-
-function attemptDuel(){
-  if(!duel || duel.resolved) return;
-  const now = performance.now();
-  const prog = clamp((now-duel.rawStart)/duel.duration, 0, 1);
-  const inZone = prog >= duel.zoneStart && prog <= (duel.zoneStart + duel.zoneWidthFrac);
-  duel.resolved = true;
-  resolveDuel(inZone);
-}
-
-function resolveDuel(success){
-  const elapsedNow = performance.now() - roundStart;
-  if(success){
-    const b = duel.bot;
-    b.len = Math.max(MIN_LEN, b.len - Math.max(16, b.len*0.55));
-    player.x -= Math.cos(player.angle)*28;
-    player.y -= Math.sin(player.angle)*28;
-    player.duelInvulnUntil = elapsedNow + 1400;
-    score += 25;
-    scoreEl.textContent = score;
-    addParticles(player.x, player.y, '#ffffff', 20);
-    sfxDuelWin();
-    duel = null;
-    duelPanel.classList.add('hidden');
-    duelDim.classList.add('hidden');
-  } else {
-    sfxDuelLose();
-    duel = null;
-    duelPanel.classList.add('hidden');
-    duelDim.classList.add('hidden');
-    killPlayer();
   }
 }
 
@@ -2065,13 +1978,10 @@ function loop(t){
   if(!initialized){ drawGrid(); drawMenuBg(t); return; }
 
   if(running && !paused){
-    if(duel){
-      updateDuelFrame();
-    } else {
-      const elapsed = t - roundStart;
-      player.color = currentPolarity(elapsed, 0);
-      updatePolarityHUD(elapsed);
-      updateBanner(elapsed);
+    const elapsed = t - roundStart;
+    player.color = currentPolarity(elapsed, 0);
+    updatePolarityHUD(elapsed);
+    updateBanner(elapsed);
 
       if(keys.ArrowLeft || keys.KeyA || keys.ArrowRight || keys.KeyD ||
          keys.ArrowUp || keys.KeyW || keys.ArrowDown || keys.KeyS){
@@ -2143,8 +2053,7 @@ function loop(t){
         if(Math.random() < 0.015) respawnBotIfDead(b);
       }
 
-      if(running && !duel) checkSnakeCollisions(elapsed);
-    }
+      if(running) checkSnakeCollisions(elapsed);
   }
 
   drawGrid();
@@ -2161,7 +2070,7 @@ function loop(t){
   }
   if(player && player.alive){
     const elapsedNow = t - roundStart;
-    const overloadActive = running && !duel && elapsedNow < (player.overloadUntil||0);
+    const overloadActive = running && elapsedNow < (player.overloadUntil||0);
     drawSnake3D(player, true, overloadActive ? '#ffd23f' : null, overloadActive);
   }
   drawParticles();
@@ -2243,11 +2152,11 @@ reviveBtn.addEventListener('click', function(){
       player.angle = rand(0, Math.PI*2);
       player.lives = START_LIVES;
     }
-    player.comboEats = []; player.overloadUntil = 0; player.duelInvulnUntil = 0;
+    player.comboEats = []; player.overloadUntil = 0;
     player.magnetUntil = 0; player.multUntil = 0; player.shieldUntil = 0;
     player.spawnProtectUntil = performance.now() + 3500;
     updateLivesHUD();
-    running = true; duel = null;
+    running = true;
     roundStart = performance.now();
     if(deathState && deathState.polarity != null) roundStart -= deathState.polarity;
     deathState = null;
