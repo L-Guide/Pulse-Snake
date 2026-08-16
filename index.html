@@ -314,6 +314,7 @@
 
 // ---------- YouTube SDK ----------
 let paused = false, _adShowing = false, sdkReady = false, initialAdShown = false;
+let dataLoaded = false, savedData = {};
 
 function sdkInit(){
   try {
@@ -327,15 +328,28 @@ function sdkInit(){
           if(typeof en === 'boolean') audioOn = en;
         } catch(e){}
         setAudioEnabled(audioOn);
-        loadBgFromSDK();
-        sdkLoad('best', function(v){ if(typeof v === 'number' && v > 0){ best = v; updateBestDisplay(); } });
+        try {
+          if(ytgame.game && ytgame.game.loadData){
+            ytgame.game.loadData().then(function(d){
+              try { savedData = JSON.parse(d) || {}; } catch(e) { savedData = {}; }
+              dataLoaded = true;
+              if(typeof savedData.best === 'number' && savedData.best > 0){ best = savedData.best; }
+              if(savedData.bgType && (savedData.bgType==='hex'||savedData.bgType==='neon')){ bgType = savedData.bgType; }
+              updateBestDisplay();
+              drawBgPreviews();
+            }).catch(function(){ dataLoaded = true; updateBestDisplay(); drawBgPreviews(); });
+          } else { dataLoaded = true; updateBestDisplay(); drawBgPreviews(); }
+        } catch(e){ dataLoaded = true; updateBestDisplay(); drawBgPreviews(); }
       };
       if(typeof ytgame.ready === 'function'){
         ytgame.ready(boot);
       } else {
         boot();
       }
-      ytgame.system.onPause(function(){ if(!paused){ paused = true; platformPause(); }});
+      ytgame.system.onPause(function(){
+        if(!paused){ paused = true; platformPause(); }
+        sdkSave('best', best);
+      });
       ytgame.system.onResume(function(){ if(paused){ paused = false; platformResume(); }});
       ytgame.system.onAudioEnabledChange(function(en){
         audioOn = !!en;
@@ -349,29 +363,15 @@ const SAVE_KEY = 'pulseSnakeSave';
 function sdkSaveData(obj){
   if(!obj) return;
   try{ localStorage.setItem(SAVE_KEY, JSON.stringify(obj)); }catch(e){}
-  try{ if(sdkReady && typeof ytgame !== 'undefined') ytgame.game.saveData(JSON.stringify(obj)); }catch(e){}
+  try{ if(dataLoaded && sdkReady && typeof ytgame !== 'undefined') ytgame.game.saveData(JSON.stringify(obj)); }catch(e){}
 }
 function sdkSave(key, val){
-  var obj = {};
-  try{ obj = JSON.parse(localStorage.getItem(SAVE_KEY)) || {}; }catch(e){}
-  obj[key] = val;
-  sdkSaveData(obj);
+  if(!dataLoaded) return;
+  savedData[key] = val;
+  sdkSaveData(savedData);
 }
 function sdkLoad(key, cb){
-  var apply = function(o){ try{ cb(o ? o[key] : null); }catch(e){ cb(null); } };
-  var local = null;
-  try{ local = JSON.parse(localStorage.getItem(SAVE_KEY)); }catch(e){}
-  if(local && local[key] !== undefined){ apply(local); return; }
-  try {
-    if(sdkReady && typeof ytgame !== 'undefined' && ytgame.game && ytgame.game.loadData){
-      ytgame.game.loadData().then(function(d){
-        var o = null;
-        try{ o = JSON.parse(d); }catch(e){}
-        if(o) sdkSaveData(o);
-        apply(o);
-      }).catch(function(){ apply(null); });
-    } else { apply(null); }
-  } catch(e){ apply(null); }
+  try{ cb(savedData ? savedData[key] : null); }catch(e){ cb(null); }
 }
 function sdkScoreVal(v){
   try { if(typeof ytgame !== 'undefined') ytgame.engagement.sendScore({value: Math.floor(v)}); } catch(e){}
@@ -605,9 +605,6 @@ let botsKilled = 0;
 let lastMilestone = 0;
 let screenShake = {x: 0, y: 0};
 
-function loadBgFromSDK(){
-  sdkLoad('bgType', function(v){ if(v==='hex'||v==='neon') bgType = v; drawBgPreviews(); });
-}
 function drawBgPreviews(){
   drawMiniHex(document.getElementById('hexPreview'));
   drawMiniNeon(document.getElementById('neonPreview'));
@@ -1297,7 +1294,7 @@ function killPlayer(){
   addParticles(player.x, player.y, player.color, 34);
   sfxDeath();
   if(score > best) best = score;
-  sdkScoreVal(score);
+  sdkScoreVal(best);
   sdkSave('best', best);
   setTimeout(showGameOver, 300);
 }
@@ -2206,6 +2203,7 @@ function pauseGame(){
   pauseOverlay.classList.remove('hidden');
   stopBGM();
   if(audioCtx) try{ audioCtx.suspend(); }catch(e){}
+  try { showInterlude(); } catch(e){}
 }
 function resumeGame(){
   paused = false;
