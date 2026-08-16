@@ -828,6 +828,7 @@ function makeSnake(x,y,color,len,isPlayer){
 }
 
 let player, bots, orbs, particles, running, initialized, score, mx, my, pointerActive, roundStart, duel;
+let deathState = null;
 let boostHeld = false, boostReady = true;
 
 const ORB_MIN_GAP = 15;
@@ -930,6 +931,7 @@ function initGame(){
   // spawn protection: 3 seconds so snake can't lose lives from wrong-color
   // orbs immediately at the start before the player takes control
   player.spawnProtectUntil = performance.now() + 3000;
+  deathState = null;
   updateLivesHUD();
   camera.x = player.x; camera.y = player.y;
   bots = [];
@@ -1276,6 +1278,14 @@ function killPlayer(){
   if(!player.alive) return;
   player.alive = false;
   running = false;
+  deathState = {
+    len: player.len,
+    thick: player.thick || 1,
+    x: player.x,
+    y: player.y,
+    angle: player.angle,
+    lives: player.lives != null ? player.lives : START_LIVES
+  };
   screenShake.x = rand(-16, 16);
   screenShake.y = rand(-16, 16);
   addParticles(player.x, player.y, player.color, 34);
@@ -2174,7 +2184,6 @@ let prevPolarity = CYAN;
 
 function beginRun(){
   initAudio();
-  showInitialAd();
   menuScreen.classList.add('hidden');
   overScreen.classList.add('hidden');
   howToPlayScreen.classList.add('hidden');
@@ -2216,14 +2225,25 @@ reviveBtn.addEventListener('click', function(){
   initAudio();
   showRewardedAd('revive-reward', function(){
     overScreen.classList.add('hidden');
-    player.alive = true; player.color = CYAN; player.len = START_LEN;
-    player.x = WORLD_W/2; player.y = WORLD_H/2;
+    player.alive = true;
+    if(deathState){
+      player.len = Math.max(deathState.len, START_LEN);
+      player.thick = deathState.thick || 1;
+      player.x = deathState.x; player.y = deathState.y;
+      player.angle = deathState.angle;
+      player.lives = Math.max(1, deathState.lives);
+    } else {
+      player.len = START_LEN; player.thick = 1;
+      player.x = WORLD_W/2; player.y = WORLD_H/2;
+      player.angle = rand(0, Math.PI*2);
+      player.lives = START_LIVES;
+    }
+    player.color = CYAN;
     player.trail = [{x:player.x, y:player.y}];
-    player.angle = rand(0, Math.PI*2);
     player.comboEats = []; player.overloadUntil = 0; player.duelInvulnUntil = 0;
     player.magnetUntil = 0; player.multUntil = 0; player.shieldUntil = 0;
-    player.lives = START_LIVES;
     player.spawnProtectUntil = performance.now() + 3500;
+    deathState = null;
     updateLivesHUD();
     running = true; duel = null;
     roundStart = performance.now();
