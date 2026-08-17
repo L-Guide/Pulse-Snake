@@ -328,7 +328,6 @@ function sdkInit(){
       ytgame.system.onAudioEnabledChange(function(en){
         audioOn = !!en;
         setAudioEnabled(audioOn);
-        if(audioOn && running && !paused && !bgmRunning) startBGM();
       });
     }
   } catch(e){}
@@ -356,7 +355,6 @@ function resumeAudioCtx(){
 function showInterlude(){
   if(_adShowing) return;
   _adShowing = true;
-  stopBGM();
   if(audioCtx) try{ audioCtx.suspend(); }catch(e){}
   try {
     if(typeof ytgame !== 'undefined' && ytgame.ads && typeof ytgame.ads.requestInterstitialAd === 'function'){
@@ -374,7 +372,6 @@ function showInitialAd(){
 function showRewardedAd(rewardId, onSuccess){
   if(_adShowing) return;
   _adShowing = true;
-  stopBGM();
   if(audioCtx) try{ audioCtx.suspend(); }catch(e){}
   try {
     if(typeof ytgame !== 'undefined' && ytgame.ads && typeof ytgame.ads.requestRewardedAd === 'function'){
@@ -390,16 +387,13 @@ function showRewardedAd(rewardId, onSuccess){
 }
 
 // ---------- Audio ----------
-let audioCtx = null, bgmGain = null;
-const bgmVolume = 0.4;
+let audioCtx = null;
 let audioOn = true;
-let bgmRunning = false, bgmTimer = null;
 
 function setAudioEnabled(en){
   try{
-    if(bgmGain) bgmGain.gain.value = en ? bgmVolume : 0;
+    if(en && audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
   }catch(e){}
-  if(!en) stopBGM();
 }
 function updateBestDisplay(){
   const st = document.getElementById('statLine');
@@ -411,10 +405,6 @@ function updateBestDisplay(){
 function initAudio(){
   if(!audioCtx){
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    bgmGain = audioCtx.createGain();
-    bgmGain.gain.value = bgmVolume;
-    bgmGain.connect(audioCtx.destination);
-    startBGM();
   }
   if(audioCtx.state === 'suspended'){
     try{ audioCtx.resume(); }catch(e){}
@@ -449,96 +439,15 @@ function checkMilestone(){
 }
 function sfxShift(){ playTone(1000,0.08,'sine',0.06); }
 
-function startBGM(){
-  if(bgmRunning || !audioCtx || !audioOn) return;
-  bgmRunning = true;
-  var master = audioCtx.createGain();
-  master.gain.value = 0.9;
-  var lp = audioCtx.createBiquadFilter();
-  lp.type = 'lowpass'; lp.frequency.value = 2800; lp.Q.value = 0.7;
-  master.connect(lp); lp.connect(bgmGain);
-  var BPM = 132, STEP = 60/BPM/4, totalSteps = 128;
-  var chords = [
-    [110, 130.81, 164.81],
-    [87.31, 110, 130.81],
-    [98, 123.47, 146.83],
-    [82.41, 98, 123.47]
-  ];
-  var arpSeq = [[0,2,1,2],[0,2,1,1],[0,2,1,1],[0,2,1,2]];
-  var stepIdx = 0, nextTime = audioCtx.currentTime + 0.05;
-  function tick(){
-    if(!bgmRunning || !audioCtx) return;
-    while(nextTime < audioCtx.currentTime + 0.12){
-      var ci = Math.floor(stepIdx/32)%4;
-      var pat = stepIdx%16;
-      var chord = chords[ci], t = nextTime;
-      if(pat%4===0||pat%4===2){
-        bgmN(chord[0], STEP*1.8, 'triangle', 0.3, master, t);
-      }
-      if(pat%2===0){
-        var ai = Math.floor((stepIdx%32)/2)%4;
-        var an = chord[arpSeq[ci][ai]]*2;
-        if(stepIdx%8===6) an*=1.5;
-        bgmN(an, STEP*0.55, 'square', 0.06, master, t);
-      }
-      if(pat%4===0) bgmK(t, master);
-      if(pat%4===2) bgmH(t, master, 0.09);
-      stepIdx = (stepIdx+1)%totalSteps;
-      nextTime += STEP;
-    }
-    bgmTimer = setTimeout(tick, 20);
-  }
-  tick();
-}
-function bgmN(freq, dur, type, vol, dest, t){
-  if(!isFinite(freq)) return;
-  var o = audioCtx.createOscillator(), g = audioCtx.createGain();
-  o.type = type; o.frequency.value = freq;
-  g.gain.setValueAtTime(vol, t);
-  g.gain.exponentialRampToValueAtTime(0.001, t+dur);
-  o.connect(g); g.connect(dest);
-  o.start(t); o.stop(t+dur+0.01);
-}
-function bgmK(t, dest){
-  var o = audioCtx.createOscillator(), g = audioCtx.createGain();
-  o.type = 'sine';
-  o.frequency.setValueAtTime(160, t);
-  o.frequency.exponentialRampToValueAtTime(42, t+0.1);
-  g.gain.setValueAtTime(0.35, t);
-  g.gain.exponentialRampToValueAtTime(0.001, t+0.13);
-  o.connect(g); g.connect(dest);
-  o.start(t); o.stop(t+0.14);
-}
-function bgmH(t, dest, vol){
-  var sz = audioCtx.sampleRate*0.04;
-  var buf = audioCtx.createBuffer(1, sz, audioCtx.sampleRate);
-  var d = buf.getChannelData(0);
-  for(var i=0;i<sz;i++) d[i]=Math.random()*2-1;
-  var s = audioCtx.createBufferSource(); s.buffer = buf;
-  var hp = audioCtx.createBiquadFilter();
-  hp.type='highpass'; hp.frequency.value=7500;
-  var g = audioCtx.createGain();
-  g.gain.setValueAtTime(vol||0.07, t);
-  g.gain.exponentialRampToValueAtTime(0.001, t+0.035);
-  s.connect(hp); hp.connect(g); g.connect(dest);
-  s.start(t); s.stop(t+0.04);
-}
-function stopBGM(){
-  bgmRunning = false;
-  if(bgmTimer){ clearTimeout(bgmTimer); bgmTimer = null; }
-}
-
 function platformPause(){
   document.body.classList.add('cd-paused');
   document.body.classList.add('plat-paused');
-  stopBGM();
   if(audioCtx) try{ audioCtx.suspend(); }catch(e){}
 }
 function platformResume(){
   document.body.classList.remove('cd-paused');
   document.body.classList.remove('plat-paused');
   if(audioCtx) try{ audioCtx.resume(); }catch(e){}
-  if(running && !paused && audioOn) startBGM();
 }
 
 const canvas = document.getElementById('game');
@@ -943,7 +852,6 @@ function initGame(){
   screenShake = {x: 0, y: 0};
   running = true;
   initialized = true;
-  if(audioOn) startBGM();
   roundStart = performance.now();
   scoreEl.textContent = '0';
   document.body.classList.add('game-active');
@@ -2124,7 +2032,6 @@ function pauseGame(){
   paused = true;
   document.body.classList.add('cd-paused');
   pauseOverlay.classList.remove('hidden');
-  stopBGM();
   if(audioCtx) try{ audioCtx.suspend(); }catch(e){}
   try { showInterlude(); } catch(e){}
 }
@@ -2133,7 +2040,6 @@ function resumeGame(){
   document.body.classList.remove('cd-paused');
   pauseOverlay.classList.add('hidden');
   if(audioCtx) try{ audioCtx.resume(); }catch(e){}
-  if(audioOn) startBGM();
 }
 function quitToMenu(){
   paused = false; running = false; initialized = false;
