@@ -287,7 +287,7 @@
 "use strict";
 
 // ---------- YouTube SDK ----------
-let paused = false, _adShowing = false, sdkReady = false, initialAdShown = false;
+let paused = false, userPaused = false, _adShowing = false, sdkReady = false, initialAdShown = false;
 let dataLoaded = false, savedData = {};
 
 function sdkInit(){
@@ -324,7 +324,7 @@ function sdkInit(){
         if(!paused){ paused = true; platformPause(); }
         sdkSave('best', best);
       });
-      ytgame.system.onResume(function(){ if(paused){ paused = false; platformResume(); }});
+      ytgame.system.onResume(function(){ if(paused && !userPaused){ paused = false; platformResume(); }});
       ytgame.system.onAudioEnabledChange(function(en){
         audioOn = !!en;
         setAudioEnabled(audioOn);
@@ -335,8 +335,8 @@ function sdkInit(){
 const SAVE_KEY = 'pulseSnakeSave';
 function sdkSaveData(obj){
   if(!obj) return;
-  try{ localStorage.setItem(SAVE_KEY, JSON.stringify(obj)); }catch(e){}
   try{ if(dataLoaded && sdkReady && typeof ytgame !== 'undefined') ytgame.game.saveData(JSON.stringify(obj)); }catch(e){}
+  try{ localStorage.setItem(SAVE_KEY, JSON.stringify(obj)); }catch(e){}
 }
 function sdkSave(key, val){
   if(!dataLoaded) return;
@@ -587,6 +587,34 @@ function buildBeadSprite(color, radius){
   x.arc(cx, cy, radius, 0, Math.PI*2);
   x.fillStyle = grad;
   x.fill();
+  if(radius >= 5){
+    x.save();
+    x.beginPath();
+    x.arc(cx, cy, radius - 0.5, 0, Math.PI*2);
+    x.clip();
+    // overlapping scalloped scales
+    x.strokeStyle = 'rgba(0,0,0,0.16)';
+    x.lineWidth = 1;
+    const rows = radius >= 9 ? 3 : 2;
+    const rowStep = radius * 0.55;
+    const startY = cy - radius * 0.55;
+    for(let r = 0; r < rows; r++){
+      const yy = startY + r * rowStep;
+      for(let xx = cx - radius; xx <= cx + radius; xx += radius * 0.5){
+        x.beginPath();
+        x.arc(xx, yy, radius * 0.34, 0, Math.PI);
+        x.stroke();
+      }
+    }
+    // dorsal highlight stripe down the spine
+    x.strokeStyle = 'rgba(255,255,255,0.16)';
+    x.lineWidth = 1.5;
+    x.beginPath();
+    x.moveTo(cx, cy - radius * 0.8);
+    x.lineTo(cx, cy + radius * 0.8);
+    x.stroke();
+    x.restore();
+  }
   x.lineWidth = 1;
   x.strokeStyle = 'rgba(0,0,0,0.25)';
   x.stroke();
@@ -711,8 +739,10 @@ function randomPointOffCamera(){
 }
 
 // ---------- entities ----------
+let snakeIdCounter = 0;
 function makeSnake(x,y,color,len,isPlayer){
   return {
+    id: ++snakeIdCounter,
     x, y, angle: rand(0,Math.PI*2),
     color, len, isPlayer,
     speed: isPlayer ? PLAYER_SPEED : BASE_SPEED, boostT:0,
@@ -992,7 +1022,7 @@ function checkOrbEat(sn, isPlayer, elapsed){
     if(dist2(sn.x,sn.y,o.x,o.y) < (o.r+headR+2)*(o.r+headR+2)){
       if(o.prism){
         orbs.splice(i,1);
-        explodePrism(o.x,o.y, sn.color);
+                explodePrism(o.x,o.y, sn.color);
         if(isPlayer){
           sn.len += GROW_AMT * 2.5;
           score += 50 * (multActive ? 2 : 1);
@@ -1006,7 +1036,7 @@ function checkOrbEat(sn, isPlayer, elapsed){
       }
       if(o.kind === 'star'){
         orbs.splice(i,1);
-        if(isPlayer){
+                if(isPlayer){
           player.multUntil = elapsed + 7000;
           score += 25;
           scoreEl.textContent = score;
@@ -1019,7 +1049,7 @@ function checkOrbEat(sn, isPlayer, elapsed){
       }
       if(o.kind === 'magnet'){
         orbs.splice(i,1);
-        if(isPlayer){
+                if(isPlayer){
           player.magnetUntil = elapsed + 5000;
           addPopup(o.x,o.y,'MAGNET!','#4db8ff');
           addParticles(o.x,o.y,'#4db8ff',14);
@@ -1029,7 +1059,7 @@ function checkOrbEat(sn, isPlayer, elapsed){
       }
       if(o.kind === 'shield'){
         orbs.splice(i,1);
-        if(isPlayer){
+                if(isPlayer){
           player.shieldUntil = elapsed + 6000;
           addPopup(o.x,o.y,'SHIELD!','#ff00ff');
           addParticles(o.x,o.y,'#ff00ff',16);
@@ -1084,7 +1114,7 @@ function checkOrbEat(sn, isPlayer, elapsed){
         addParticles(o.x,o.y,o.color,6);
       }
       orbs.splice(i,1);
-      if(orbs.length < ORB_COUNT*1.2) orbs.push(isPlayer ? spawnOrbNear(player.x, player.y) : spawnOrb());
+            if(orbs.length < ORB_COUNT*1.2) orbs.push(isPlayer ? spawnOrbNear(player.x, player.y) : spawnOrb());
       break;
     }
   }
@@ -1471,14 +1501,116 @@ function drawSnake3D(sn, isPlayer, overrideColor, overloadGlow){
   drawBead(hx, hy, headR, bodyColor);
   ctx.shadowBlur = 0;
 
-  const a1 = sn.angle - 0.55, a2 = sn.angle + 0.55;
-  const eyeR = 4.1 * thick, pupilR = 1.9 * thick, eyeOff = 8.2 * thick;
-  for(const ang of [a1, a2]){
-    const ex = hx + Math.cos(ang) * eyeOff, ey = hy + Math.sin(ang) * eyeOff;
-    ctx.beginPath(); ctx.arc(ex, ey, eyeR, 0, Math.PI*2); ctx.fillStyle = '#fff'; ctx.fill();
+  // Eye animation + face details (blink, teeth, tongue)
+  const nowT = performance.now();
+  const snId = sn.id || 0;
+  const eOff = headR * 0.55;
+
+  // Blink: each snake blinks ~150ms every 2.8–4.5s (per-snake offset)
+  const blinkPeriod = 2800 + (snId % 5) * 420;
+  const blinkAmt = (nowT % blinkPeriod) < 150
+    ? Math.sin(((nowT % blinkPeriod) / 150) * Math.PI)
+    : 0;
+
+  // Tongue: forked tongue flicks ~210ms about every 1.8–3s
+  const tonguePeriod = 1800 + ((snId * 7) % 5) * 320;
+  const tongueCycle = nowT % tonguePeriod;
+  let tongueLen = 0, tongueW = 0;
+  if(tongueCycle < 210){
+    const p = tongueCycle / 210;
+    tongueLen = Math.sin(p * Math.PI) * 9 * thick;
+    tongueW = Math.sin(p * Math.PI);
+  }
+
+  // === EYES — glowing cyan diamonds, squint-blink ===
+  const EYE_W = 4.6 * thick, EYE_H = 5.8 * thick;
+  for(const sgn of [1, -1]){
+    const ea = sn.angle + sgn * 0.5;
+    const ex = hx + Math.cos(ea) * eOff;
+    const ey = hy + Math.sin(ea) * eOff;
+    const eyeH = (1 - blinkAmt) * EYE_H + 0.3;
+    ctx.save();
+    ctx.translate(ex, ey);
+    ctx.rotate(sn.angle);
+    ctx.shadowColor = 'rgba(0,255,240,0.9)';
+    ctx.shadowBlur = 16;
+    ctx.fillStyle = '#7dfff7';
     ctx.beginPath();
-    ctx.arc(ex + Math.cos(sn.angle)*eyeR*0.34, ey + Math.sin(sn.angle)*eyeR*0.34, pupilR, 0, Math.PI*2);
-    ctx.fillStyle = '#111'; ctx.fill();
+    ctx.moveTo(0, -eyeH);
+    ctx.lineTo(EYE_W, 0);
+    ctx.lineTo(0, eyeH);
+    ctx.lineTo(-EYE_W, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#062233';
+    ctx.fillRect(-1.1 * thick, -1.7 * thick, 2.2 * thick, 3.4 * thick);
+    ctx.restore();
+  }
+
+  // perp vector (needed for teeth below)
+  const eyePerpX = -Math.sin(sn.angle);
+  const eyePerpY =  Math.cos(sn.angle);
+
+  // === TEETH — two curved fangs at front, pointing forward ===
+  const fLen  = headR * 0.75;
+  const fBase = headR * 0.18;
+  ctx.shadowColor = 'rgba(255,255,255,0.55)';
+  ctx.shadowBlur = 5;
+  for(const sgn of [1, -1]){
+    // base: front of head, offset left/right perpendicularly
+    const bx = hx + Math.cos(sn.angle) * headR * 0.7 + eyePerpX * sgn * headR * 0.26;
+    const by = hy + Math.sin(sn.angle) * headR * 0.7 + eyePerpY * sgn * headR * 0.26;
+    ctx.save();
+    ctx.translate(bx, by);
+    // rotate so local +x = snake forward direction, slight outward tilt
+    ctx.rotate(sn.angle + sgn * 0.18);
+
+    // gradient root→tip along forward axis (local +x)
+    const fg = ctx.createLinearGradient(0, 0, fLen, 0);
+    fg.addColorStop(0,   '#ffffff');
+    fg.addColorStop(0.5, '#e4f6ff');
+    fg.addColorStop(1,   '#a8d8ec');
+    ctx.fillStyle = fg;
+
+    // fang shape: wide at base (y-axis), tapers to round point at tip (x-axis)
+    ctx.beginPath();
+    ctx.moveTo(0,  -fBase);                                         // base top
+    ctx.bezierCurveTo(fLen*0.45, -fBase*0.7, fLen*0.8, -fBase*0.2, fLen, 0);  // top curve to tip
+    ctx.bezierCurveTo(fLen*0.8,   fBase*0.2, fLen*0.45,  fBase*0.7, 0,  fBase); // bottom tip to base
+    ctx.lineTo(0, -fBase);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(0,50,90,0.25)';
+    ctx.lineWidth = 0.7;
+    ctx.stroke();
+    ctx.restore();
+  }
+  ctx.shadowBlur = 0;
+
+  // Tongue — forked red tongue flicking forward periodically
+  if(tongueLen > 0){
+    const tx = hx + Math.cos(sn.angle) * headR * 0.8;
+    const ty = hy + Math.sin(sn.angle) * headR * 0.8;
+    ctx.save();
+    ctx.translate(tx, ty);
+    ctx.rotate(sn.angle);
+    ctx.strokeStyle = 'rgba(255,80,100,0.92)';
+    ctx.lineCap = 'round';
+    ctx.lineWidth = 1.8 * thick;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(tongueLen, 0);
+    ctx.stroke();
+    ctx.lineWidth = 1.1 * thick;
+    ctx.beginPath();
+    ctx.moveTo(tongueLen, 0);
+    ctx.lineTo(tongueLen + tongueLen * 0.55, -tongueW * 3.5 * thick);
+    ctx.moveTo(tongueLen, 0);
+    ctx.lineTo(tongueLen + tongueLen * 0.55, tongueW * 3.5 * thick);
+    ctx.stroke();
+    ctx.restore();
   }
 
   if(isPlayer){
@@ -2030,19 +2162,20 @@ function togglePause(){
 }
 function pauseGame(){
   paused = true;
+  userPaused = true;
   document.body.classList.add('cd-paused');
   pauseOverlay.classList.remove('hidden');
   if(audioCtx) try{ audioCtx.suspend(); }catch(e){}
-  try { showInterlude(); } catch(e){}
 }
 function resumeGame(){
   paused = false;
+  userPaused = false;
   document.body.classList.remove('cd-paused');
   pauseOverlay.classList.add('hidden');
   if(audioCtx) try{ audioCtx.resume(); }catch(e){}
 }
 function quitToMenu(){
-  paused = false; running = false; initialized = false;
+  paused = false; userPaused = false; running = false; initialized = false;
   document.body.classList.remove('cd-paused');
   document.body.classList.remove('plat-paused');
   document.body.classList.remove('game-active');
@@ -2082,7 +2215,20 @@ reviveBtn.addEventListener('click', function(){
     document.body.classList.add('game-active');
   });
 });
-document.getElementById('resumeBtn').addEventListener('click', resumeGame);
+document.getElementById('resumeBtn').addEventListener('click', function(){
+  if(_adShowing) return;
+  try {
+    showInterlude();
+    var checkAd = setInterval(function(){
+      if(!_adShowing){
+        clearInterval(checkAd);
+        resumeGame();
+      }
+    }, 100);
+  } catch(e){
+    resumeGame();
+  }
+});
 document.getElementById('quitBtn').addEventListener('click', quitToMenu);
 document.getElementById('pauseBtn').addEventListener('click', togglePause);
 document.getElementById('howToPlayBtn').addEventListener('click', function(){
